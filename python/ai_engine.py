@@ -339,6 +339,7 @@ class TollAIEngine:
     def __init__(self, source, model_path: str = 'yolov8n.pt', show_window: bool = True):
         self.source = source
         self.show_window = show_window
+        self.port = int(os.environ.get('PORT', 5001))
 
         # Load YOLO model
         logger.info(f"Loading YOLO model: {model_path}")
@@ -371,16 +372,16 @@ class TollAIEngine:
         self.plate_last_seen[plate] = now
         return False
 
-    def _save_image(self, frame: np.ndarray, vehicle_type: str, plate: str) -> str:
+    def _save_image(self, frame: np.ndarray, vehicle_type: str, plate: str, camera_id: int) -> str:
         """Save the captured vehicle frame to disk."""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:19]
         safe_plate = re.sub(r'[^\w]', '_', plate) if plate else 'unknown'
-        filename = f"{vehicle_type}_{safe_plate}_{timestamp}_CAM{CAMERA_ID}.jpg"
+        filename = f"{vehicle_type}_{safe_plate}_{timestamp}_CAM{camera_id}.jpg"
         path = OUTPUT_DIR / filename
         cv2.imwrite(str(path), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         return str(path)
 
-    def _process_frame(self, frame: np.ndarray):
+    def _process_frame(self, frame: np.ndarray, camera_id: int):
         """Run YOLO detection + OCR on a single frame."""
         results = self.model(frame, conf=YOLO_CONF_THRESHOLD, verbose=False)[0]
 
@@ -421,7 +422,7 @@ class TollAIEngine:
                 continue
 
             # Save image
-            img_path = self._save_image(frame, vehicle_type, plate_text)
+            img_path = self._save_image(frame, vehicle_type, plate_text, camera_id)
 
             # Toll calculation
             toll = TOLL_RATES.get(vehicle_type, 0)
@@ -432,7 +433,7 @@ class TollAIEngine:
                 'vehicle_type': vehicle_type,
                 'plate_number': plate_text,
                 'image_path':   img_path,
-                'camera_id':    CAMERA_ID,
+                'camera_id':    camera_id,
                 'entry_time':   datetime.now(),
                 'confidence':   round(conf * 100, 2),
                 'toll_amount':  toll,
@@ -485,6 +486,45 @@ class TollAIEngine:
 
         try:
             while True:
+                # 1. Check for uploaded raw webcam frames first (supporting both cameras)
+                webcam_processed = False
+                for cam_id in [1, 2]:
+                    raw_frame = None
+                    try:
+                        req = urllib.request.Request(f"http://localhost:{self.port}/api/camera/{cam_id}/raw_download")
+                        with urllib.request.urlopen(req, timeout=0.1) as res:
+                            img_bytes = res.read()
+                            if img_bytes:
+                                nparr = np.frombuffer(img_bytes, np.uint8)
+                                raw_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    except Exception:
+                        pass
+
+                    if raw_frame is not None:
+                        # Process webcam frame for this camera
+                        processed = self._process_frame(raw_frame, cam_id)
+                        
+                        # Post processed frame back to Flask
+                        try:
+                            _, jpeg = cv2.imencode('.jpg', processed)
+                            post_req = urllib.request.Request(
+                                f"http://localhost:{self.port}/api/camera/{cam_id}/frame",
+                                data=jpeg.tobytes(),
+                                headers={'Content-Type': 'image/jpeg'}
+                            )
+                            with urllib.request.urlopen(post_req, timeout=0.03) as res:
+                                res.read()
+                        except Exception as e:
+                            logger.warning(f"Error posting webcam frame for camera {cam_id}: {e}")
+                        
+                        webcam_processed = True
+
+                if webcam_processed:
+                    # If we processed webcam frame(s), sleep a bit to regulate rate and skip the video loop tick
+                    time.sleep(0.1)
+                    continue
+
+                # 2. Default: Process video stream frame
                 ret, frame = cap.read()
                 if not ret:
                     if isinstance(self.source, str) and not str(self.source).isdigit():
@@ -506,7 +546,7 @@ class TollAIEngine:
                     continue
 
                 # Process
-                frame = self._process_frame(frame)
+                frame = self._process_frame(frame, CAMERA_ID)
 
                 # HUD
                 self._update_fps()
@@ -516,7 +556,7 @@ class TollAIEngine:
                 try:
                     _, jpeg = cv2.imencode('.jpg', frame)
                     req = urllib.request.Request(
-                        f"http://localhost:5001/api/camera/{CAMERA_ID}/frame",
+                        f"http://localhost:{self.port}/api/camera/{CAMERA_ID}/frame",
                         data=jpeg.tobytes(),
                         headers={'Content-Type': 'image/jpeg'}
                     )

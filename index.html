@@ -339,6 +339,13 @@
                     </div>
                   </div>
                 </div>
+                <!-- Browser Webcam control -->
+                <div class="d-flex justify-content-between align-items-center mt-3 pt-2" style="border-top: 1px solid var(--border);">
+                  <button class="export-btn btn-webcam-toggle" id="webcam-btn-1" onclick="WebcamModule.toggleWebcam(1)" style="font-size:12px; padding:6px 12px; background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.25);">
+                    <i class="bi bi-camera-video-fill"></i> Start Browser Webcam
+                  </button>
+                  <span class="text-muted-c" id="webcam-status-1" style="font-size:11px;">Inactive</span>
+                </div>
               </div>
             </div>
           </div>
@@ -387,6 +394,13 @@
                       <div class="s-label">Alerts</div>
                     </div>
                   </div>
+                </div>
+                <!-- Browser Webcam control -->
+                <div class="d-flex justify-content-between align-items-center mt-3 pt-2" style="border-top: 1px solid var(--border);">
+                  <button class="export-btn btn-webcam-toggle" id="webcam-btn-2" onclick="WebcamModule.toggleWebcam(2)" style="font-size:12px; padding:6px 12px; background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.25);">
+                    <i class="bi bi-camera-video-fill"></i> Start Browser Webcam
+                  </button>
+                  <span class="text-muted-c" id="webcam-status-2" style="font-size:11px;">Inactive</span>
                 </div>
               </div>
             </div>
@@ -861,6 +875,7 @@
 <script src="assets/js/fraud.js"></script>
 <script src="assets/js/rates.js"></script>
 <script src="assets/js/reports.js"></script>
+<script src="assets/js/webcam.js"></script>
 <script src="assets/js/app.js"></script>
 
 <!-- Post-init extras -->
