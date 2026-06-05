@@ -139,6 +139,24 @@ def upload_camera_frame(camera_id):
     latest_frames[camera_id] = request.data
     return jsonify({'success': True})
 
+# In-memory store for raw client webcam uploads (for remote AI processing)
+latest_raw_frames = {}
+latest_raw_frame_times = {}
+
+@app.route('/api/camera/<int:camera_id>/raw_upload', methods=['POST'])
+def upload_raw_frame(camera_id):
+    latest_raw_frames[camera_id] = request.data
+    latest_raw_frame_times[camera_id] = time.time()
+    return jsonify({'success': True})
+
+@app.route('/api/camera/<int:camera_id>/raw_download', methods=['GET'])
+def download_raw_frame(camera_id):
+    t = latest_raw_frame_times.get(camera_id, 0)
+    # Consider frame valid if uploaded within last 3.5 seconds
+    if time.time() - t < 3.5 and camera_id in latest_raw_frames:
+        return latest_raw_frames[camera_id], 200, {'Content-Type': 'image/jpeg'}
+    return jsonify({'error': 'No recent raw frame'}), 404
+
 def generate_video_stream(camera_id):
     placeholder_path = os.path.join(ROOT_DIR, 'assets', 'img', 'vehicles', 'toll_plaza.png')
     placeholder_bytes = None

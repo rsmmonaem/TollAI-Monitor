@@ -17,6 +17,11 @@ const WebcamModule = (() => {
     }
 
     try {
+      // 0. Check API support
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Webcam API not supported (requires HTTPS or localhost).');
+      }
+
       // 1. Request camera media stream
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -29,20 +34,63 @@ const WebcamModule = (() => {
       // 2. Cache the stream
       activeStreams[cameraId] = stream;
 
-      // 3. Create a hidden video element to play the stream
+      // 3. Find DOM target container
+      const img = document.getElementById(`cam${cameraId}f-img`) || document.getElementById(`cam${cameraId}-img`);
+      const container = img ? img.parentElement : null;
+
+      // 4. Create video element
       const video = document.createElement('video');
+      video.id = `webcam-video-element-${cameraId}`;
       video.srcObject = stream;
       video.setAttribute('playsinline', 'true');
       video.muted = true;
+
+      // Position video inside container
+      if (container) {
+        // Remove old video element if exists
+        const oldVideo = container.querySelector(`#webcam-video-element-${cameraId}`);
+        if (oldVideo) oldVideo.remove();
+
+        container.appendChild(video);
+
+        const isBackendOnline = window.AppData && window.AppData.isBackend;
+        if (isBackendOnline) {
+          // ONLINE: Keep video hidden, use it to capture frames and post to backend,
+          // then reload the MJPEG image stream to ensure it connects.
+          video.style.position = 'absolute';
+          video.style.width = '1px';
+          video.style.height = '1px';
+          video.style.opacity = '0';
+          video.style.pointerEvents = 'none';
+
+          // Force reload the MJPEG streams
+          const timestamp = Date.now();
+          const imgOverview = document.getElementById(`cam${cameraId}-img`);
+          const imgFull = document.getElementById(`cam${cameraId}f-img`);
+          if (imgOverview) imgOverview.src = `/api/camera/${cameraId}/stream?t=${timestamp}`;
+          if (imgFull) imgFull.src = `/api/camera/${cameraId}/stream?t=${timestamp}`;
+        } else {
+          // OFFLINE: Display local webcam video directly on top of the static image
+          video.style.position = 'absolute';
+          video.style.top = '0';
+          video.style.left = '0';
+          video.style.width = '100%';
+          video.style.height = '100%';
+          video.style.objectFit = 'cover';
+          video.style.zIndex = '2';
+          video.style.display = 'block';
+        }
+      }
+
       await video.play();
 
-      // 4. Create a hidden canvas for capturing frames
+      // 5. Create a canvas for capturing frames
       const canvas = document.createElement('canvas');
       canvas.width = 640;
       canvas.height = 360;
       const ctx = canvas.getContext('2d');
 
-      // 5. Start frame upload loop (~6 frames per second to prevent network choking)
+      // 6. Start frame upload loop (~6 frames per second)
       const uploadInterval = setInterval(() => {
         if (video.readyState === video.HAVE_ENOUGH_DATA) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -63,7 +111,7 @@ const WebcamModule = (() => {
 
       activeIntervals[cameraId] = uploadInterval;
 
-      // 6. Update UI to Active state
+      // 7. Update UI to Active state
       if (btn) {
         btn.innerHTML = '<i class="bi bi-camera-video-off-fill"></i> Stop Browser Webcam';
         btn.style.background = 'rgba(239, 68, 68, 0.2)'; // Glass red
@@ -72,7 +120,7 @@ const WebcamModule = (() => {
       }
 
       if (statusText) {
-        statusText.textContent = 'Streaming to AI';
+        statusText.textContent = window.AppData && window.AppData.isBackend ? 'Streaming to AI' : 'Local Preview';
         statusText.style.color = '#34d399'; // Success green
       }
 
@@ -83,11 +131,11 @@ const WebcamModule = (() => {
     } catch (error) {
       console.error('[Webcam] Error accessing camera:', error);
       if (statusText) {
-        statusText.textContent = 'Permission Denied';
+        statusText.textContent = 'Connection Error';
         statusText.style.color = '#f87171'; // Error red
       }
       if (window.App && window.App.toast) {
-        window.App.toast('❌ Could not access camera. Ensure HTTPS or localhost is used.', 'error');
+        window.App.toast(`❌ Camera Error: ${error.message || 'Access Denied'}`, 'error');
       }
     }
   }
@@ -105,7 +153,20 @@ const WebcamModule = (() => {
       delete activeStreams[cameraId];
     }
 
-    // 3. Reset UI
+    // 3. Remove video elements from DOM
+    const video = document.getElementById(`webcam-video-element-${cameraId}`);
+    if (video) video.remove();
+
+    // 4. Revert image sources if backend was online
+    if (window.AppData && window.AppData.isBackend) {
+      const imgOverview = document.getElementById(`cam${cameraId}-img`);
+      const imgFull = document.getElementById(`cam${cameraId}f-img`);
+      const defaultUrl = `/api/camera/${cameraId}/stream?t=${Date.now()}`;
+      if (imgOverview) imgOverview.src = defaultUrl;
+      if (imgFull) imgFull.src = defaultUrl;
+    }
+
+    // 5. Reset UI
     const btn = document.getElementById(`webcam-btn-${cameraId}`);
     const statusText = document.getElementById(`webcam-status-${cameraId}`);
 
