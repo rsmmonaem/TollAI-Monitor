@@ -1,0 +1,49 @@
+# AI Toll & Lease Collection Monitoring System
+# Python AI Engine — Dependencies
+
+# Core AI
+ultralytics>=8.0.0          # YOLOv8 vehicle detection
+opencv-python>=4.8.0        # Video capture & image processing
+easyocr>=1.7.0              # License plate OCR (Bengali + English)
+
+# Database
+mysql-connector-python>=8.2.0  # MySQL connectivity
+
+# Web API Server
+Flask>=3.0.0
+Flask-Cors>=4.0.0
+
+# Utilities
+Pillow>=10.0.0              # Image manipulation
+numpy>=1.24.0               # Array operations
+
+# Optional: GPU acceleration
+# torch>=2.0.0 --index-url https://download.pytorch.org/whl/cu118
+# torchvision>=0.15.0 --index-url https://download.pytorch.org/whl/cu118
+
+# Optional: RTSP stream support
+# imageio[ffmpeg]>=2.31.0
+
+# ── Installation ─────────────────────────────────────────────
+# 1. Create virtual environment:
+#    python -m venv venv
+#    source venv/bin/activate   (Linux/Mac)
+#    venv\Scripts\activate      (Windows)
+#
+# 2. Install dependencies:
+#    pip install -r requirements.txt
+#
+# 3. YOLO model will auto-download on first run (yolov8n.pt ~6MB)
+#
+# 4. MySQL Setup:
+#    CREATE DATABASE toll_monitoring CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+#    Then update DB_CONFIG in ai_engine.py
+#
+# 5. Run AI Engine:
+#    python ai_engine.py --source 0           (webcam)
+#    python ai_engine.py --source video.mp4   (video file)
+#    python ai_engine.py --source rtsp://ip   (IP camera)
+#
+# 6. Seed demo data:
+#    python demo_data_generator.py
+#    python demo_data_generator.py --dry-run  (test without DB)

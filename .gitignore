@@ -1,0 +1,25 @@
+# Ignore Python virtual environment
+venv/
+.venv/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore local binary files (Weights and Archives)
+yolov8n.pt
+Archive.zip
+assets/img/vehicles/toll_plaza.png
+
+# Ignore local database and logs
+*.db
+*.log
+
+# Ignore local vehicle captures (YOLO output directory)
+captured_vehicles/
+
+# Ignore OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Toll & Lease Collection Monitoring System | Government Dashboard</title>
+  <meta name="description" content="Government-grade AI-powered toll collection monitoring system with real-time vehicle detection, ANPR, revenue calculation, and fraud detection." />
+
+  <!-- Bootstrap 5 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+  <!-- Custom Theme -->
+  <link rel="stylesheet" href="assets/css/style.css" />
+</head>
+<body>
+
+<div class="app-wrapper">
+
+  <!-- ═══════════════════════════════════════════════════
+       SIDEBAR
+  ═══════════════════════════════════════════════════ -->
+  <nav id="sidebar">
+
+    <!-- Brand -->
+    <div class="sidebar-brand">
+      <div class="brand-icon">🛣️</div>
+      <div class="brand-text">
+        <h5>TollAI Monitor</h5>
+        <span>Highway Authority BD</span>
+      </div>
+    </div>
+
+    <!-- Main Nav -->
+    <span class="sidebar-section-label">Main</span>
+    <ul class="nav-menu">
+      <li>
+        <a class="nav-link active" data-section="dashboard" href="#dashboard">
+          <i class="bi bi-grid-1x2-fill"></i>
+          <span>Overview</span>
+        </a>
+      </li>
+      <li>
+        <a class="nav-link" data-section="live-feed" href="#live-feed">
+          <i class="bi bi-camera-video-fill"></i>
+          <span>Live Camera Feed</span>
+          <span class="badge-pill">LIVE</span>
+        </a>
+      </li>
+      <li>
+        <a class="nav-link" data-section="detection" href="#detection">
+          <i class="bi bi-table"></i>
+          <span>Detection Log</span>
+        </a>
+      </li>
+    </ul>
+
+    <hr class="divider mx-3" />
+
+    <!-- Analytics -->
+    <span class="sidebar-section-label">Analytics</span>
+    <ul class="nav-menu">
+      <li>
+        <a class="nav-link" data-section="analytics" href="#analytics">
+          <i class="bi bi-bar-chart-fill"></i>
+          <span>Revenue Analytics</span>
+        </a>
+      </li>
+      <li>
+        <a class="nav-link" data-section="fraud" href="#fraud">
+          <i class="bi bi-shield-exclamation"></i>
+          <span>Fraud Detection</span>
+          <span class="badge-pill">!</span>
+        </a>
+      </li>
+    </ul>
+
+    <hr class="divider mx-3" />
+
+    <!-- Admin -->
+    <span class="sidebar-section-label">Administration</span>
+    <ul class="nav-menu">
+      <li>
+        <a class="nav-link" data-section="rates" href="#rates">
+          <i class="bi bi-currency-exchange"></i>
+          <span>Toll Rates</span>
+        </a>
+      </li>
+      <li>
+        <a class="nav-link" data-section="reports" href="#reports">
+          <i class="bi bi-file-earmark-bar-graph-fill"></i>
+          <span>Reports</span>
+        </a>
+      </li>
+    </ul>
+
+    <!-- Sidebar Footer -->
+    <div class="sidebar-footer">
+      <div class="user-avatar">A</div>
+      <div class="user-info">
+        <h6>Admin Officer</h6>
+        <small>Highway Authority</small>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════════════════════════════════
+       MAIN CONTENT
+  ═══════════════════════════════════════════════════ -->
+  <div id="main-content">
+
+    <!-- Top Header -->
+    <header id="topbar">
+      <div class="d-flex align-items-center gap-3">
+        <button class="btn-icon d-lg-none" id="mobile-menu-btn">
+          <i class="bi bi-list"></i>
+        </button>
+        <div class="topbar-left">
+          <h4 id="topbar-title">Overview Dashboard</h4>
+          <span>AI Toll & Lease Collection Monitoring System</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="system-status">
+          <div class="status-dot"></div>
+          System Online
+        </div>
+        <div class="topbar-clock" id="live-clock">--:--:-- --</div>
+        <div class="btn-icon" title="Notifications">
+          <i class="bi bi-bell"></i>
+          <div class="notif-dot"></div>
+        </div>
+        <div class="btn-icon" title="Settings">
+          <i class="bi bi-gear"></i>
+        </div>
+      </div>
+    </header>
+
+    <!-- Page Content -->
+    <main class="page-content">
+
+      <!-- ═══════════════════════════════════════════════
+           SECTION 1: OVERVIEW DASHBOARD
+      ═══════════════════════════════════════════════ -->
+      <section id="section-dashboard" class="page-section active">
+
+        <!-- Stats Cards -->
+        <div class="section-title">
+          <h5><i class="bi bi-speedometer2"></i> Today's Overview</h5>
+          <small class="text-muted-c">
+            <i class="bi bi-clock"></i>&nbsp;
+            <span id="today-date"></span>
+          </small>
+        </div>
+
+        <div class="row" id="stat-cards-row">
+          <!-- Rendered by dashboard.js -->
+        </div>
+
+        <!-- Camera Preview + Quick Stats -->
+        <div class="row mt-2">
+          <!-- Camera Previews -->
+          <div class="col-xl-8 col-lg-7 mb-4">
+            <div class="glass-card">
+              <div class="card-header-custom">
+                <h6><i class="bi bi-camera-video-fill text-danger-c"></i> Live Camera Monitoring</h6>
+                <a href="#live-feed" class="nav-link text-primary-c" data-section="live-feed" style="font-size:12px;padding:0;">
+                  View All <i class="bi bi-arrow-right"></i>
+                </a>
+              </div>
+              <div class="card-body-custom">
+                <div class="row g-3">
+                  <!-- Camera 1 -->
+                  <div class="col-6">
+                    <div class="camera-feed">
+                      <img src="https://images.unsplash.com/photo-1542282088-72c9c27ed0cd?auto=format&fit=crop&q=80&w=800" alt="Camera 1 Feed" id="cam1-img" />
+                      <div class="camera-overlay">
+                        <div class="camera-hud-top">
+                          <span class="cam-badge live">
+                            <span class="cam-live-dot"></span> LIVE
+                          </span>
+                          <span class="cam-badge" style="font-size:10px;" id="cam1-time-badge">CAM-01</span>
+                        </div>
+                        <div id="cam1-overlay" style="position:absolute;inset:0;"></div>
+                        <div class="camera-hud-bottom">
+                          <div>
+                            <div style="font-size:9px;color:rgba(255,255,255,0.5);margin-bottom:2px;">PLATE DETECTED</div>
+                            <div style="font-size:11px;font-weight:700;color:#fff;font-family:monospace;" id="cam1-plate">—</div>
+                          </div>
+                          <div style="text-align:right;">
+                            <div style="font-size:9px;color:rgba(255,255,255,0.5);" id="cam1-type">TYPE</div>
+                            <div style="font-size:10px;color:#22c55e;font-weight:600;" id="cam1-conf">—</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Camera 2 -->
+                  <div class="col-6">
+                    <div class="camera-feed">
+                      <img src="https://images.unsplash.com/photo-1542282088-72c9c27ed0cd?auto=format&fit=crop&q=80&w=800" alt="Camera 2 Feed" id="cam2-img" />
+                      <div class="camera-overlay">
+                        <div class="camera-hud-top">
+                          <span class="cam-badge live">
+                            <span class="cam-live-dot"></span> LIVE
+                          </span>
+                          <span class="cam-badge" style="font-size:10px;">CAM-02</span>
+                        </div>
+                        <div id="cam2-overlay" style="position:absolute;inset:0;"></div>
+                        <div class="camera-hud-bottom">
+                          <div>
+                            <div style="font-size:9px;color:rgba(255,255,255,0.5);margin-bottom:2px;">PLATE DETECTED</div>
+                            <div style="font-size:11px;font-weight:700;color:#fff;font-family:monospace;" id="cam2-plate">—</div>
+                          </div>
+                          <div style="text-align:right;">
+                            <div style="font-size:9px;color:rgba(255,255,255,0.5);" id="cam2-type">TYPE</div>
+                            <div style="font-size:10px;color:#22c55e;font-weight:600;" id="cam2-conf">—</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Revenue Doughnut -->
+          <div class="col-xl-4 col-lg-5 mb-4">
+            <div class="glass-card h-100">
+              <div class="card-header-custom">
+                <h6><i class="bi bi-pie-chart-fill text-primary-c"></i> Vehicle Distribution</h6>
+              </div>
+              <div class="card-body-custom">
+                <canvas id="chartDistribution" height="240"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fraud Alert Banner (mini) -->
+        <div class="fraud-alert-banner mb-4" style="cursor:pointer;" onclick="App.navigateTo('fraud')">
+          <div class="alert-icon">⚠️</div>
+          <div>
+            <h5 style="font-size:14px;">Revenue Leakage Detected — Click to View Details</h5>
+            <p style="font-size:12px;">Bike discrepancy: Operator reported 500, AI detected 650. Immediate action required.</p>
+          </div>
+          <i class="bi bi-arrow-right-circle ms-auto" style="font-size:20px;color:#f87171;"></i>
+        </div>
+
+        <!-- Recent Detection Preview -->
+        <div class="glass-card">
+          <div class="card-header-custom">
+            <h6><i class="bi bi-activity"></i> Recent Detections</h6>
+            <span id="live-count-badge" style="font-size:11px;color:var(--success);background:rgba(16,185,129,0.1);padding:3px 10px;border-radius:12px;border:1px solid rgba(16,185,129,0.2);">
+              0 detected today
+            </span>
+          </div>
+          <div class="card-body-custom p-0">
+            <div class="detection-table-wrapper" style="max-height:320px;overflow-y:auto;">
+              <table class="detection-table">
+                <thead>
+                  <tr>
+                    <th>Image</th>
+                    <th>Type</th>
+                    <th>Number Plate</th>
+                    <th>Time</th>
+                    <th>Confidence</th>
+                    <th>Camera</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="detection-tbody">
+                  <!-- Rendered by detection-table.js -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ═══════════════════════════════════════════════
+           SECTION 2: LIVE CAMERA FEED (Full)
+      ═══════════════════════════════════════════════ -->
+      <section id="section-live-feed" class="page-section">
+
+        <div class="section-title">
+          <h5><i class="bi bi-camera-video-fill"></i> Live Camera Monitoring</h5>
+          <div class="system-status" style="font-size:12px;">
+            <div class="status-dot"></div> 2 Cameras Active
+          </div>
+        </div>
+
+        <div class="row g-4">
+          <!-- Camera 1 Full -->
+          <div class="col-lg-6">
+            <div class="glass-card">
+              <div class="card-header-custom">
+                <h6><i class="bi bi-camera-video text-danger-c"></i> Camera 1 — Toll Lane A (Inbound)</h6>
+                <span class="cam-badge live"><span class="cam-live-dot"></span> LIVE</span>
+              </div>
+              <div class="card-body-custom">
+                <div class="camera-feed" style="aspect-ratio:16/9;">
+                  <img src="https://images.unsplash.com/photo-1542282088-72c9c27ed0cd?auto=format&fit=crop&q=80&w=800" alt="Camera 1" id="cam1f-img" />
+                  <div class="camera-overlay">
+                    <div id="cam1f-overlay" style="position:absolute;inset:0;"></div>
+                    <div class="camera-hud-bottom">
+                      <div>
+                        <div style="font-size:9px;color:rgba(255,255,255,0.5);margin-bottom:2px;">DETECTED PLATE</div>
+                        <div style="font-size:13px;font-weight:700;color:#fff;font-family:monospace;" id="cam1f-plate">—</div>
+                      </div>
+                      <div style="text-align:right;">
+                        <div style="font-size:10px;color:#22c55e;font-weight:600;" id="cam1f-type">—</div>
+                        <div style="font-size:11px;font-weight:700;color:#22c55e;" id="cam1f-conf">—</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <!-- Camera Stats -->
+                <div class="row g-2 mt-3">
+                  <div class="col-4">
+                    <div class="summary-stat">
+                      <div class="s-value text-primary-c" id="cam1-today-count">0</div>
+                      <div class="s-label">Today</div>
+                    </div>
+                  </div>
+                  <div class="col-4">
+                    <div class="summary-stat">
+                      <div class="s-value text-success-c" id="cam1-revenue">৳0</div>
+                      <div class="s-label">Revenue</div>
+                    </div>
+                  </div>
+                  <div class="col-4">
+                    <div class="summary-stat">
+                      <div class="s-value" style="color:#fbbf24;" id="cam1-alerts">0</div>
+                      <div class="s-label">Alerts</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Camera 2 Full -->
+          <div class="col-lg-6">
+            <div class="glass-card">
+              <div class="card-header-custom">
+                <h6><i class="bi bi-camera-video text-danger-c"></i> Camera 2 — Toll Lane B (Outbound)</h6>
+                <span class="cam-badge live"><span class="cam-live-dot"></span> LIVE</span>
+              </div>
+              <div class="card-body-custom">
+                <div class="camera-feed" style="aspect-ratio:16/9;">
+                  <img src="https://images.unsplash.com/photo-1542282088-72c9c27ed0cd?auto=format&fit=crop&q=80&w=800" alt="Camera 2" id="cam2f-img" />
+                  <div class="camera-overlay">
+                    <div id="cam2f-overlay" style="position:absolute;inset:0;"></div>
+                    <div class="camera-hud-bottom">
+                      <div>
+                        <div style="font-size:9px;color:rgba(255,255,255,0.5);margin-bottom:2px;">DETECTED PLATE</div>
+                        <div style="font-size:13px;font-weight:700;color:#fff;font-family:monospace;" id="cam2f-plate">—</div>
+                      </div>
+                      <div style="text-align:right;">
+                        <div style="font-size:10px;color:#22c55e;font-weight:600;" id="cam2f-type">—</div>
+                        <div style="font-size:11px;font-weight:700;color:#22c55e;" id="cam2f-conf">—</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <!-- Camera Stats -->
+                <div class="row g-2 mt-3">
+                  <div class="col-4">
+                    <div class="summary-stat">
+                      <div class="s-value text-primary-c" id="cam2-today-count">0</div>
+                      <div class="s-label">Today</div>
+                    </div>
+                  </div>
+                  <div class="col-4">
+                    <div class="summary-stat">
+                      <div class="s-value text-success-c" id="cam2-revenue">৳0</div>
+                      <div class="s-label">Revenue</div>
+                    </div>
+                  </div>
+                  <div class="col-4">
+                    <div class="summary-stat">
+                      <div class="s-value" style="color:#fbbf24;" id="cam2-alerts">0</div>
+                      <div class="s-label">Alerts</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Detection Info -->
+        <div class="row g-4 mt-1">
+          <div class="col-12">
+            <div class="glass-card">
+              <div class="card-header-custom">
+                <h6><i class="bi bi-cpu-fill text-primary-c"></i> AI Engine Status</h6>
+              </div>
+              <div class="card-body-custom">
+                <div class="row g-3">
+                  <div class="col-md-3">
+                    <div class="summary-stat">
+                      <div class="s-value text-success-c">YOLOv8</div>
+                      <div class="s-label">Detection Model</div>
+                    </div>
+                  </div>
+                  <div class="col-md-3">
+                    <div class="summary-stat">
+                      <div class="s-value text-primary-c">EasyOCR</div>
+                      <div class="s-label">OCR Engine</div>
+                    </div>
+                  </div>
+                  <div class="col-md-3">
+                    <div class="summary-stat">
+                      <div class="s-value" style="color:#fbbf24;">30 FPS</div>
+                      <div class="s-label">Processing Speed</div>
+                    </div>
+                  </div>
+                  <div class="col-md-3">
+                    <div class="summary-stat">
+                      <div class="s-value text-success-c">97.2%</div>
+                      <div class="s-label">Avg Accuracy</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ═══════════════════════════════════════════════
+           SECTION 3: DETECTION LOG (Full Table)
+      ═══════════════════════════════════════════════ -->
+      <section id="section-detection" class="page-section">
+
+        <div class="section-title">
+          <h5><i class="bi bi-table"></i> Vehicle Detection Log</h5>
+          <div class="d-flex align-items-center gap-2">
+            <span id="live-count-badge2" class="system-status" style="font-size:12px;">
+              <div class="status-dot"></div> Live Feed Active
+            </span>
+          </div>
+        </div>
+
+        <!-- Summary Bar -->
+        <div class="row g-2 mb-4" id="summary-bar">
+          <!-- Rendered by dashboard.js -->
+        </div>
+
+        <!-- Full Detection Table -->
+        <div class="glass-card">
+          <div class="card-header-custom">
+            <h6><i class="bi bi-list-check"></i> All Detected Vehicles</h6>
+            <div class="d-flex gap-2 align-items-center">
+              <small style="color:var(--text-muted);font-size:11px;">Auto-refreshing every 2.5s</small>
+              <div style="width:8px;height:8px;border-radius:50%;background:var(--success);animation:pulse-dot 1.5s ease infinite;"></div>
+            </div>
+          </div>
+          <div class="card-body-custom p-0">
+            <div class="detection-table-wrapper" style="max-height:600px;overflow-y:auto;">
+              <table class="detection-table">
+                <thead>
+                  <tr>
+                    <th style="width:70px;">Image</th>
+                    <th>Type</th>
+                    <th>Number Plate</th>
+                    <th>Time</th>
+                    <th>Confidence</th>
+                    <th>Camera</th>
+                    <th>Toll Rate</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="detection-tbody-full">
+                  <!-- Mirror of main tbody — synced via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ═══════════════════════════════════════════════
+           SECTION 4: REVENUE ANALYTICS
+      ═══════════════════════════════════════════════ -->
+      <section id="section-analytics" class="page-section">
+
+        <div class="section-title">
+          <h5><i class="bi bi-bar-chart-fill"></i> Revenue Analytics</h5>
+          <small class="text-muted-c">Real-time AI-computed revenue data</small>
+        </div>
+
+        <!-- Top Revenue Cards -->
+        <div class="row g-3 mb-4">
+          <div class="col-md-4">
+            <div class="stat-card" style="--stat-color:#10b981;--stat-icon-bg:rgba(16,185,129,0.15);">
+              <div class="stat-info">
+                <div class="stat-label">Total Revenue Today</div>
+                <div class="stat-value text-success-c" id="analytics-total-rev">৳0</div>
+                <div class="stat-change up"><i class="bi bi-arrow-up-right"></i> +8.7% vs yesterday</div>
+              </div>
+              <div class="stat-icon"><i class="bi bi-cash-stack"></i></div>
+              <div class="stat-glow"></div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="stat-card" style="--stat-color:#3b82f6;--stat-icon-bg:rgba(59,130,246,0.15);">
+              <div class="stat-info">
+                <div class="stat-label">Peak Hour Revenue</div>
+                <div class="stat-value" id="analytics-peak-rev">৳0</div>
+                <div class="stat-change up"><i class="bi bi-clock"></i> Highest traffic window</div>
+              </div>
+              <div class="stat-icon"><i class="bi bi-graph-up-arrow"></i></div>
+              <div class="stat-glow"></div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="stat-card" style="--stat-color:#f59e0b;--stat-icon-bg:rgba(245,158,11,0.15);">
+              <div class="stat-info">
+                <div class="stat-label">Avg Revenue / Vehicle</div>
+                <div class="stat-value" id="analytics-avg-rev">৳0</div>
+                <div class="stat-change up"><i class="bi bi-calculator"></i> Across all categories</div>
+              </div>
+              <div class="stat-icon"><i class="bi bi-percent"></i></div>
+              <div class="stat-glow"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row g-4">
+          <!-- Hourly Traffic Bar -->
+          <div class="col-lg-8">
+            <div class="glass-card h-100">
+              <div class="card-header-custom">
+                <h6><i class="bi bi-bar-chart-line-fill text-primary-c"></i> Hourly Traffic Analysis</h6>
+                <small class="text-muted-c">Color: 🔴 Peak &nbsp; 🟡 High &nbsp; 🔵 Normal</small>
+              </div>
+              <div class="card-body-custom">
+                <div class="chart-container" style="height:300px;">
+                  <canvas id="chartHourly"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Distribution Doughnut -->
+          <div class="col-lg-4">
+            <div class="glass-card h-100">
+              <div class="card-header-custom">
+                <h6><i class="bi bi-pie-chart-fill text-primary-c"></i> Vehicle Distribution</h6>
+              </div>
+              <div class="card-body-custom">
+                <canvas id="chartDistribution" height="280"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Revenue Trend Line -->
+        <div class="row mt-4">
+          <div class="col-12">
+            <div class="glass-card">
+              <div class="card-header-custom">
+                <h6><i class="bi bi-graph-up text-success-c"></i> Revenue Trend — Today vs Yesterday</h6>
+                <small class="text-muted-c">Hourly breakdown in BDT (৳)</small>
+              </div>
+              <div class="card-body-custom">
+                <div class="chart-container" style="height:260px;">
+                  <canvas id="chartRevenueTrend"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ═══════════════════════════════════════════════
+           SECTION 5: FRAUD DETECTION
+      ═══════════════════════════════════════════════ -->
+      <section id="section-fraud" class="page-section">
+
+        <div class="section-title">
+          <h5><i class="bi bi-shield-exclamation"></i> Fraud Detection Module</h5>
+          <small class="text-danger-c"><i class="bi bi-exclamation-triangle-fill"></i> Action Required</small>
+        </div>
+
+        <!-- Alert Banner -->
+        <div id="fraud-alert-banner" class="fraud-alert-banner mb-4">
+          <!-- Rendered by fraud.js -->
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="row g-3 mb-4">
+          <div class="col-md-3">
+            <div class="stat-card" style="--stat-color:#ef4444;--stat-icon-bg:rgba(239,68,68,0.15);">
+              <div class="stat-info">
+                <div class="stat-label">Estimated Leakage</div>
+                <div class="stat-value text-danger-c" id="fraud-leakage-amount">৳0</div>
+                <div class="stat-change down"><i class="bi bi-arrow-down-right"></i> Revenue gap</div>
+              </div>
+              <div class="stat-icon"><i class="bi bi-exclamation-triangle-fill"></i></div>
+              <div class="stat-glow"></div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="stat-card" style="--stat-color:#f59e0b;--stat-icon-bg:rgba(245,158,11,0.15);">
+              <div class="stat-info">
+                <div class="stat-label">Discrepancy Rate</div>
+                <div class="stat-value" id="fraud-leakage-pct" style="color:#fbbf24;">0%</div>
+                <div class="stat-change down">Operator vs AI</div>
+              </div>
+              <div class="stat-icon"><i class="bi bi-percent"></i></div>
+              <div class="stat-glow"></div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="stat-card" style="--stat-color:#94a3b8;--stat-icon-bg:rgba(148,163,184,0.1);">
+              <div class="stat-info">
+                <div class="stat-label">Operator Count</div>
+                <div class="stat-value text-secondary-c" id="fraud-operator-total">0</div>
+                <div class="stat-change">Manual report</div>
+              </div>
+              <div class="stat-icon"><i class="bi bi-person-badge"></i></div>
+              <div class="stat-glow"></div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="stat-card" style="--stat-color:#3b82f6;--stat-icon-bg:rgba(59,130,246,0.15);">
+              <div class="stat-info">
+                <div class="stat-label">AI Count</div>
+                <div class="stat-value text-primary-c" id="fraud-ai-total">0</div>
+                <div class="stat-change up">Camera verified</div>
+              </div>
+              <div class="stat-icon"><i class="bi bi-cpu-fill"></i></div>
+              <div class="stat-glow"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Comparison Table -->
+        <div id="fraud-comparison-table">
+          <!-- Rendered by fraud.js -->
+        </div>
+
+        <!-- Recommendation -->
+        <div class="glass-card mt-4">
+          <div class="card-header-custom">
+            <h6><i class="bi bi-lightbulb-fill" style="color:#fbbf24;"></i> System Recommendation</h6>
+          </div>
+          <div class="card-body-custom">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <div style="display:flex;gap:12px;padding:12px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);border-radius:8px;">
+                  <span style="font-size:22px;">🚨</span>
+                  <div>
+                    <div style="font-weight:600;color:#f87171;font-size:13px;margin-bottom:4px;">High Priority</div>
+                    <div style="font-size:12px;color:var(--text-secondary);">Conduct immediate physical audit of Toll Lane A. Bike count discrepancy of 150 vehicles suggests possible operator data manipulation.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div style="display:flex;gap:12px;padding:12px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:8px;">
+                  <span style="font-size:22px;">🔍</span>
+                  <div>
+                    <div style="font-weight:600;color:#fbbf24;font-size:13px;margin-bottom:4px;">Recommended Action</div>
+                    <div style="font-size:12px;color:var(--text-secondary);">Review CCTV footage from 06:00–10:00 AM. Cross-verify with AI detection log. File official discrepancy report with authority.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ═══════════════════════════════════════════════
+           SECTION 6: TOLL RATE MANAGEMENT
+      ═══════════════════════════════════════════════ -->
+      <section id="section-rates" class="page-section">
+
+        <div class="section-title">
+          <h5><i class="bi bi-currency-exchange"></i> Toll Rate Management</h5>
+          <small class="text-muted-c">Admin only — Changes take effect immediately</small>
+        </div>
+
+        <div class="row g-4">
+          <!-- Rate Editor -->
+          <div class="col-lg-7">
+            <div class="glass-card">
+              <div class="card-header-custom">
+                <h6><i class="bi bi-pencil-square text-primary-c"></i> Current Toll Rates</h6>
+                <button class="btn-save-rate" onclick="RatesModule.saveAllRates()" style="font-size:12px;padding:5px 14px;">
+                  <i class="bi bi-save2"></i> Save All
+                </button>
+              </div>
+              <div class="card-body-custom">
+                <div id="rates-table-container">
+                  <!-- Rendered by rates.js -->
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Change History -->
+          <div class="col-lg-5">
+            <div class="glass-card h-100">
+              <div class="card-header-custom">
+                <h6><i class="bi bi-clock-history text-primary-c"></i> Rate Change History</h6>
+              </div>
+              <div class="card-body-custom" id="rate-history" style="max-height:500px;overflow-y:auto;">
+                <!-- Rendered by rates.js -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rate Info Card -->
+        <div class="glass-card mt-4">
+          <div class="card-header-custom">
+            <h6><i class="bi bi-info-circle-fill text-primary-c"></i> Rate Policy Information</h6>
+          </div>
+          <div class="card-body-custom">
+            <div class="row g-3">
+              <div class="col-md-4">
+                <div style="padding:12px;background:rgba(37,99,235,0.06);border:1px solid rgba(37,99,235,0.15);border-radius:8px;">
+                  <div style="font-size:12px;font-weight:600;color:#60a5fa;margin-bottom:6px;"><i class="bi bi-shield-check"></i> Authority</div>
+                  <div style="font-size:12px;color:var(--text-secondary);">Bangladesh Road Transport Authority (BRTA). Rates are set per the Toll Collection Policy 2022.</div>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div style="padding:12px;background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.15);border-radius:8px;">
+                  <div style="font-size:12px;font-weight:600;color:#34d399;margin-bottom:6px;"><i class="bi bi-calendar-check"></i> Effective Date</div>
+                  <div style="font-size:12px;color:var(--text-secondary);">Rates last reviewed: January 2025. Next scheduled review: January 2026.</div>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div style="padding:12px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:8px;">
+                  <div style="font-size:12px;font-weight:600;color:#fbbf24;margin-bottom:6px;"><i class="bi bi-lock-fill"></i> Authorization</div>
+                  <div style="font-size:12px;color:var(--text-secondary);">Rate changes require Super Admin approval and are logged with audit trail for compliance.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ═══════════════════════════════════════════════
+           SECTION 7: REPORTS
+      ═══════════════════════════════════════════════ -->
+      <section id="section-reports" class="page-section">
+
+        <div class="section-title">
+          <h5><i class="bi bi-file-earmark-bar-graph-fill"></i> Reports & Export</h5>
+          <div class="d-flex gap-2">
+            <button class="export-btn export-pdf" onclick="ReportsModule.exportPDF()">
+              <i class="bi bi-file-earmark-pdf-fill"></i> Export PDF
+            </button>
+            <button class="export-btn export-excel" onclick="ReportsModule.exportExcel()">
+              <i class="bi bi-file-earmark-excel-fill"></i> Export Excel
+            </button>
+          </div>
+        </div>
+
+        <!-- Report Type Tabs -->
+        <div class="report-type-tabs">
+          <button class="report-tab active" id="tab-daily" onclick="ReportsModule.setReportType('daily')">
+            <i class="bi bi-calendar-day"></i> Daily
+          </button>
+          <button class="report-tab" id="tab-weekly" onclick="ReportsModule.setReportType('weekly')">
+            <i class="bi bi-calendar-week"></i> Weekly
+          </button>
+          <button class="report-tab" id="tab-monthly" onclick="ReportsModule.setReportType('monthly')">
+            <i class="bi bi-calendar-month"></i> Monthly
+          </button>
+        </div>
+
+        <!-- Report Title -->
+        <div class="glass-card mb-4">
+          <div class="card-body-custom">
+            <div class="d-flex align-items-center gap-3">
+              <div style="width:44px;height:44px;background:rgba(37,99,235,0.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;">📋</div>
+              <div>
+                <div id="report-title" style="font-size:15px;font-weight:700;color:var(--text-primary);">Daily Report</div>
+                <div style="font-size:12px;color:var(--text-muted);">Dhaka Bypass Toll Plaza · Generated by AI Monitoring System</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Summary Stats -->
+        <div class="row g-3 mb-4" id="report-summary">
+          <!-- Rendered by reports.js -->
+        </div>
+
+        <!-- Revenue by Type Chart -->
+        <div class="glass-card mb-4">
+          <div class="card-header-custom">
+            <h6><i class="bi bi-bar-chart-fill text-success-c"></i> Revenue by Vehicle Type</h6>
+          </div>
+          <div class="card-body-custom">
+            <div class="chart-container" style="height:240px;">
+              <canvas id="chartRevenueByType"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Data Table -->
+        <div class="glass-card">
+          <div class="card-header-custom">
+            <h6><i class="bi bi-table"></i> Detailed Report Data</h6>
+            <div class="d-flex gap-2">
+              <button class="export-btn export-pdf" onclick="ReportsModule.exportPDF()" style="font-size:11px;padding:5px 12px;">
+                <i class="bi bi-file-pdf"></i> PDF
+              </button>
+              <button class="export-btn export-excel" onclick="ReportsModule.exportExcel()" style="font-size:11px;padding:5px 12px;">
+                <i class="bi bi-file-excel"></i> Excel
+              </button>
+            </div>
+          </div>
+          <div class="card-body-custom p-0" id="report-table-container">
+            <!-- Rendered by reports.js -->
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- Toast Notification Container -->
+<div id="toast-container"></div>
+
+<!-- ───────────────────────────────────────────────────────
+     SCRIPTS
+─────────────────────────────────────────────────────── -->
+<!-- Bootstrap 5 -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<!-- jsPDF + AutoTable (PDF export) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<!-- SheetJS (Excel export) -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+<!-- App Modules (order matters) -->
+<script src="assets/js/data-generator.js"></script>
+<script src="assets/js/dashboard.js"></script>
+<script src="assets/js/charts.js"></script>
+<script src="assets/js/detection-table.js"></script>
+<script src="assets/js/fraud.js"></script>
+<script src="assets/js/rates.js"></script>
+<script src="assets/js/reports.js"></script>
+<script src="assets/js/app.js"></script>
+
+<!-- Post-init extras -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // Set today's date
+  const dateEl = document.getElementById('today-date');
+  if (dateEl) {
+    dateEl.textContent = new Date().toLocaleDateString('en-BD', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+  }
+
+  // Sync full detection table (section 3) with the main tbody
+  // MutationObserver keeps both tables in sync
+  const mainTbody = document.getElementById('detection-tbody');
+  const fullTbody = document.getElementById('detection-tbody-full');
+
+  if (mainTbody && fullTbody) {
+    fullTbody.innerHTML = mainTbody.innerHTML; // Initial sync on load
+    const observer = new MutationObserver(() => {
+      fullTbody.innerHTML = mainTbody.innerHTML;
+    });
+    observer.observe(mainTbody, { childList: true, subtree: true });
+  }
+
+  // Camera analytics (simulate cam-specific stats)
+  setTimeout(() => {
+    const d = window.AppData;
+    if (!d) return;
+
+    if (window.App && window.App.updateCameraStats) {
+      window.App.updateCameraStats();
+    }
+
+    // Analytics revenue cards
+    const totalRev = d.revenue.total;
+    const peakHour = d.hourly.reduce((max, h) => h.revenue > max.revenue ? h : max, { revenue: 0 });
+    const avgRev = d.records.length > 0 ? Math.round(totalRev / d.records.length) : 0;
+
+    const arEl = document.getElementById('analytics-total-rev');
+    const prEl = document.getElementById('analytics-peak-rev');
+    const avgEl = document.getElementById('analytics-avg-rev');
+    if (arEl) arEl.textContent = '৳' + totalRev.toLocaleString();
+    if (prEl) prEl.textContent = '৳' + peakHour.revenue.toLocaleString();
+    if (avgEl) avgEl.textContent = '৳' + avgRev.toLocaleString();
+  }, 500);
+});
+</script>
+
+</body>
+</html>
