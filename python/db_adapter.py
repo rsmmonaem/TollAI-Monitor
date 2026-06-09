@@ -11,12 +11,11 @@ try:
 except ImportError:
     MYSQL_AVAILABLE = False
 
-# Import configuration
+# Configuration path setup
 sys_path = os.path.dirname(os.path.abspath(__file__))
 import sys
 if sys_path not in sys.path:
     sys.path.append(sys_path)
-from ai_engine import DB_CONFIG
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -140,6 +139,7 @@ class SQLiteConnectionWrapper:
 
 def get_db_connection():
     """Returns a connection. Tries MySQL first, falls back to SQLite."""
+    from ai_engine import DB_CONFIG
     # 1. Try MySQL if available
     if MYSQL_AVAILABLE:
         try:

@@ -362,6 +362,7 @@ class TollAIEngine:
         self.fps_counter = 0
         self.fps_start = time.time()
         self.current_fps = 0.0
+        self.last_webcam_frame_time = 0.0
 
     def _is_duplicate(self, plate: str) -> bool:
         """Check if this plate was seen recently (cooldown window)."""
@@ -501,6 +502,7 @@ class TollAIEngine:
                         pass
 
                     if raw_frame is not None:
+                        self.last_webcam_frame_time = time.time()
                         # Process webcam frame for this camera
                         processed = self._process_frame(raw_frame, cam_id)
                         
@@ -521,6 +523,11 @@ class TollAIEngine:
 
                 if webcam_processed:
                     # If we processed webcam frame(s), sleep a bit to regulate rate and skip the video loop tick
+                    time.sleep(0.1)
+                    continue
+
+                # If we recently processed browser webcam uploads, don't fall back to local video stream yet
+                if time.time() - self.last_webcam_frame_time < 2.0:
                     time.sleep(0.1)
                     continue
 
