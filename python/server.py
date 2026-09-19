@@ -276,6 +276,26 @@ def upload_camera_frame(camera_id):
     latest_frame_times[camera_id] = time.time()
     return jsonify({'success': True})
 
+@app.route('/api/cameras/broadcast_frame', methods=['POST'])
+def broadcast_camera_frames():
+    """Ultra-fast zero-overhead endpoint for AI Engine to update all camera frames in one request."""
+    data = request.data
+    cam_ids_header = request.headers.get('X-Camera-IDs', '')
+    now = time.time()
+    if cam_ids_header:
+        try:
+            cam_ids = [int(c.strip()) for c in cam_ids_header.split(',') if c.strip().isdigit()]
+        except Exception:
+            cam_ids = list(NVR_CHANNELS.keys())
+    else:
+        cam_ids = list(NVR_CHANNELS.keys())
+    
+    for cid in cam_ids:
+        latest_frames[cid] = data
+        latest_frame_times[cid] = now
+        
+    return jsonify({'success': True, 'count': len(cam_ids)})
+
 # In-memory store for raw client webcam uploads (for remote AI processing)
 latest_raw_frames = {}
 latest_raw_frame_times = {}
@@ -294,19 +314,41 @@ def download_raw_frame(camera_id):
         return latest_raw_frames[camera_id], 200, {'Content-Type': 'image/jpeg'}
     return jsonify({'error': 'No recent raw frame'}), 404
 
+@app.route('/api/camera/raw_active_frame', methods=['GET'])
+def get_raw_active_frame():
+    """Return the freshest client webcam frame across all channels in one shot, or 204 if none."""
+    now = time.time()
+    for cid, t in list(latest_raw_frame_times.items()):
+        if now - t < 3.0 and cid in latest_raw_frames:
+            return Response(
+                latest_raw_frames[cid],
+                mimetype='image/jpeg',
+                headers={'X-Camera-ID': str(cid)}
+            )
+    return ('', 204)
+
 def generate_video_stream(camera_id):
     placeholder_bytes = get_placeholder_bytes()
+    last_sent_ts = 0.0
 
     while True:
-        frame_bytes = fetch_nvr_snapshot(camera_id, max_age=0.15)
-        if not frame_bytes:
-            frame_bytes = placeholder_bytes
+        now = time.time()
+        ai_time = latest_frame_times.get(camera_id, 0.0)
+        nvr_time = nvr_frame_cache_times.get(camera_id, 0.0)
+        curr_ts = max(ai_time, nvr_time)
 
-        if frame_bytes:
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        # Only push frame if it's genuinely new or as a heartbeat every 1.5s
+        if curr_ts > last_sent_ts or (now - last_sent_ts) > 1.5:
+            frame_bytes = fetch_nvr_snapshot(camera_id, max_age=0.2)
+            if not frame_bytes:
+                frame_bytes = placeholder_bytes
+
+            if frame_bytes:
+                last_sent_ts = curr_ts if curr_ts > 0 else now
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         
-        time.sleep(0.04)  # ~25 FPS smooth real-time stream
+        time.sleep(0.025)  # 40Hz check for minimal latency (<25ms)
 
 @app.route('/api/camera/<int:camera_id>/stream')
 def get_camera_stream(camera_id):

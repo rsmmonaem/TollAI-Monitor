@@ -64,6 +64,7 @@ const App = (() => {
 
     // Update URL hash
     window.location.hash = sectionId;
+    updateActiveStreams();
   }
 
   function initNav() {
@@ -204,12 +205,8 @@ const App = (() => {
     if (feedSel) feedSel.value = camId;
     if (dashSel) dashSel.value = camId;
 
-    // Update image stream sources
-    const imgFeed = document.getElementById(`cam${slot}f-img`);
-    const imgDash = document.getElementById(`cam${slot}-img`);
-    const streamUrl = `/api/camera/${camId}/stream?t=${Date.now()}`;
-    if (imgFeed) imgFeed.src = streamUrl;
-    if (imgDash) imgDash.src = streamUrl;
+    // Update active stream sources dynamically
+    updateActiveStreams();
 
     // Update AI / NVR stream badge
     const badge = document.getElementById(`cam${slot}f-ai-badge`);
@@ -240,10 +237,7 @@ const App = (() => {
   function onQuadSelectChange(quadIndex, camId) {
     camId = parseInt(camId, 10);
     activeCameras[`quad${quadIndex}`] = camId;
-    const img = document.getElementById(`quad${quadIndex}-img`);
-    if (img) {
-      img.src = `/api/camera/${camId}/stream?t=${Date.now()}`;
-    }
+    updateActiveStreams();
   }
 
   function setCameraView(mode) {
@@ -269,17 +263,10 @@ const App = (() => {
       all14Interval = null;
     }
 
-    if (mode === 'quad') {
-      [1, 2, 3, 4].forEach(i => {
-        const camId = activeCameras[`quad${i}`];
-        const img = document.getElementById(`quad${i}-img`);
-        if (img) {
-          img.src = `/api/camera/${camId}/stream?t=${Date.now()}`;
-        }
-      });
-    } else if (mode === 'all14') {
+    if (mode === 'all14') {
       renderAll14Grid();
     }
+    updateActiveStreams();
   }
 
   function focusCamera(camId) {
@@ -349,19 +336,78 @@ const App = (() => {
     }, 1500);
   }
 
+  function updateActiveStreams() {
+    if (!window.AppData || !window.AppData.isBackend) return;
+    const currentSection = (window.location.hash.replace('#', '') || 'dashboard');
+
+    const c1 = document.getElementById('cam1-img');
+    const c2 = document.getElementById('cam2-img');
+    const c1f = document.getElementById('cam1f-img');
+    const c2f = document.getElementById('cam2f-img');
+
+    const s1 = activeCameras.slot1 || 1;
+    const s2 = activeCameras.slot2 || 2;
+    const s1Url = `/api/camera/${s1}/stream`;
+    const s2Url = `/api/camera/${s2}/stream`;
+
+    if (currentSection === 'dashboard') {
+      if (c1 && (!c1.src || !c1.src.includes(`/api/camera/${s1}/stream`))) c1.src = s1Url;
+      if (c2 && (!c2.src || !c2.src.includes(`/api/camera/${s2}/stream`))) c2.src = s2Url;
+      if (c1f && c1f.src) c1f.src = '';
+      if (c2f && c2f.src) c2f.src = '';
+      [1, 2, 3, 4].forEach(i => {
+        const q = document.getElementById(`quad${i}-img`);
+        if (q && q.src) q.src = '';
+      });
+      if (all14Interval) { clearInterval(all14Interval); all14Interval = null; }
+    } else if (currentSection === 'live-feed') {
+      if (c1 && c1.src) c1.src = '';
+      if (c2 && c2.src) c2.src = '';
+      if (currentCameraView === 'dual') {
+        if (c1f && (!c1f.src || !c1f.src.includes(`/api/camera/${s1}/stream`))) c1f.src = s1Url;
+        if (c2f && (!c2f.src || !c2f.src.includes(`/api/camera/${s2}/stream`))) c2f.src = s2Url;
+        [1, 2, 3, 4].forEach(i => {
+          const q = document.getElementById(`quad${i}-img`);
+          if (q && q.src) q.src = '';
+        });
+        if (all14Interval) { clearInterval(all14Interval); all14Interval = null; }
+      } else if (currentCameraView === 'quad') {
+        if (c1f && c1f.src) c1f.src = '';
+        if (c2f && c2f.src) c2f.src = '';
+        [1, 2, 3, 4].forEach(i => {
+          const camId = activeCameras[`quad${i}`];
+          const q = document.getElementById(`quad${i}-img`);
+          const qUrl = `/api/camera/${camId}/stream`;
+          if (q && (!q.src || !q.src.includes(`/api/camera/${camId}/stream`))) q.src = qUrl;
+        });
+        if (all14Interval) { clearInterval(all14Interval); all14Interval = null; }
+      } else if (currentCameraView === 'all14') {
+        if (c1f && c1f.src) c1f.src = '';
+        if (c2f && c2f.src) c2f.src = '';
+        [1, 2, 3, 4].forEach(i => {
+          const q = document.getElementById(`quad${i}-img`);
+          if (q && q.src) q.src = '';
+        });
+      }
+    } else {
+      // Free up all network sockets on other tabs to completely eliminate latency & queue bloat
+      if (c1 && c1.src) c1.src = '';
+      if (c2 && c2.src) c2.src = '';
+      if (c1f && c1f.src) c1f.src = '';
+      if (c2f && c2f.src) c2f.src = '';
+      [1, 2, 3, 4].forEach(i => {
+        const q = document.getElementById(`quad${i}-img`);
+        if (q && q.src) q.src = '';
+      });
+      if (all14Interval) { clearInterval(all14Interval); all14Interval = null; }
+    }
+  }
+
   function startCameraSimulation() {
     initCameraSelectors();
 
     if (window.AppData.isBackend) {
-      // In backend mode, connect the image elements directly to the live MJPEG streams
-      const c1 = document.getElementById('cam1-img');
-      const c2 = document.getElementById('cam2-img');
-      const c1f = document.getElementById('cam1f-img');
-      const c2f = document.getElementById('cam2f-img');
-      if (c1) c1.src = '/api/camera/1/stream';
-      if (c2) c2.src = '/api/camera/2/stream';
-      if (c1f) c1f.src = '/api/camera/1/stream';
-      if (c2f) c2f.src = '/api/camera/2/stream';
+      updateActiveStreams();
       return;
     }
 

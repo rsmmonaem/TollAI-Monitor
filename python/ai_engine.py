@@ -661,7 +661,7 @@ class TollAIEngine:
 
     def _process_frame(self, frame: np.ndarray, camera_id: int):
         """Run YOLO tracking + ultra-fast non-blocking OCR pipeline on a single frame."""
-        results = self.model.track(frame, conf=YOLO_CONF_THRESHOLD, persist=True, verbose=False)[0]
+        results = self.model.track(frame, conf=YOLO_CONF_THRESHOLD, persist=True, verbose=False, imgsz=480)[0]
 
         for det in results.boxes:
             # Vehicle classification
@@ -767,6 +767,10 @@ class TollAIEngine:
                 logger.warning(f"⚠️ Cannot open primary source '{self.source}'. Probing HTTP ISAPI fallback...")
                 cap = None
             else:
+                try:
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                except Exception:
+                    pass
                 src_fps = cap.get(cv2.CAP_PROP_FPS) or 30
                 width   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 height  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -817,45 +821,42 @@ class TollAIEngine:
                     time.sleep(0.1)
                     continue
 
-                # 1. Check for uploaded raw webcam frames first for any active camera
-                webcam_processed = False
-                for cam_id in active_cams:
-                    raw_frame = None
+                # 1. Single ultra-fast check for any active uploaded client webcam frame
+                raw_frame = None
+                webcam_cam_id = None
+                try:
+                    res = self.http_session.get(f"http://localhost:{self.port}/api/camera/raw_active_frame", timeout=0.08)
+                    if res.status_code == 200 and res.content:
+                        nparr = np.frombuffer(res.content, np.uint8)
+                        raw_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                        webcam_cam_id = int(res.headers.get('X-Camera-ID', active_cams[0]))
+                except Exception:
+                    pass
+
+                if raw_frame is not None and webcam_cam_id is not None:
+                    self.last_webcam_frame_time = time.time()
+                    if raw_frame.shape[1] > 960:
+                        raw_frame = cv2.resize(raw_frame, (640, 360))
+                    with self.model_lock:
+                        processed = self._process_frame(raw_frame, webcam_cam_id)
+                    
+                    # Post processed frame back to Flask
                     try:
-                        res = self.http_session.get(f"http://localhost:{self.port}/api/camera/{cam_id}/raw_download", timeout=0.1)
-                        if res.status_code == 200 and res.content:
-                            nparr = np.frombuffer(res.content, np.uint8)
-                            raw_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                    except Exception:
-                        pass
-
-                    if raw_frame is not None:
-                        self.last_webcam_frame_time = time.time()
-                        if raw_frame.shape[1] > 960:
-                            raw_frame = cv2.resize(raw_frame, (640, 360))
-                        with self.model_lock:
-                            processed = self._process_frame(raw_frame, cam_id)
-                        
-                        # Post processed frame back to Flask
-                        try:
-                            _, jpeg = cv2.imencode('.jpg', processed, [cv2.IMWRITE_JPEG_QUALITY, 75])
-                            self.http_session.post(
-                                f"http://localhost:{self.port}/api/camera/{cam_id}/frame",
-                                data=jpeg.tobytes(),
-                                headers={'Content-Type': 'image/jpeg'},
-                                timeout=0.2
-                            )
-                        except Exception as e:
-                            logger.debug(f"Error posting webcam frame for camera {cam_id}: {e}")
-                        
-                        webcam_processed = True
-
-                if webcam_processed:
-                    time.sleep(0.03)
+                        _, jpeg = cv2.imencode('.jpg', processed, [cv2.IMWRITE_JPEG_QUALITY, 65])
+                        self.http_session.post(
+                            f"http://localhost:{self.port}/api/camera/{webcam_cam_id}/frame",
+                            data=jpeg.tobytes(),
+                            headers={'Content-Type': 'image/jpeg'},
+                            timeout=0.15
+                        )
+                    except Exception as e:
+                        logger.debug(f"Error posting webcam frame for camera {webcam_cam_id}: {e}")
+                    
+                    time.sleep(0.02)
                     continue
 
                 if time.time() - self.last_webcam_frame_time < 2.0:
-                    time.sleep(0.03)
+                    time.sleep(0.02)
                     continue
 
                 # 2. Process video frame from cap or HTTP snapshot
@@ -890,7 +891,7 @@ class TollAIEngine:
 
                 frame_num += 1
 
-                # Resize if high resolution to maintain 25+ FPS
+                # Resize if high resolution to maintain 30+ FPS
                 if frame.shape[1] > 960:
                     frame = cv2.resize(frame, (640, 360))
 
@@ -903,21 +904,24 @@ class TollAIEngine:
                 # HUD overlay
                 draw_hud(proc_frame, self.current_fps, self.total_today, self.total_revenue)
 
-                # Encode to JPEG once for streaming
-                _, jpeg = cv2.imencode('.jpg', proc_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                # Ultra-fast JPEG encode with quality 65 (cuts latency & size in half)
+                _, jpeg = cv2.imencode('.jpg', proc_frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
                 jpeg_bytes = jpeg.tobytes()
 
-                # Broadcast live annotated frame to all active cameras via keep-alive session
-                for current_cam in active_cams:
-                    try:
-                        self.http_session.post(
-                            f"http://localhost:{self.port}/api/camera/{current_cam}/frame",
-                            data=jpeg_bytes,
-                            headers={'Content-Type': 'image/jpeg'},
-                            timeout=0.2
-                        )
-                    except Exception:
-                        pass
+                # One single broadcast POST to update all active cameras instantly
+                cams_csv = ",".join(map(str, active_cams))
+                try:
+                    self.http_session.post(
+                        f"http://localhost:{self.port}/api/cameras/broadcast_frame",
+                        data=jpeg_bytes,
+                        headers={
+                            'Content-Type': 'image/jpeg',
+                            'X-Camera-IDs': cams_csv
+                        },
+                        timeout=0.25
+                    )
+                except Exception:
+                    pass
 
                 # Display if window is enabled
                 if self.show_window:
