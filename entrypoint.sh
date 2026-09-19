@@ -63,7 +63,8 @@ else
     # In cloud environments with no camera and no video yet, download demo clip
     if [ ! -f "traffic.mp4" ] && [ ! -f "python/traffic.mp4" ]; then
         echo "Downloading sample traffic video for cloud container..."
-        curl -sL -o traffic.mp4 https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/free-way-traffic.mp4 2>/dev/null || true
+        curl -sL -o traffic.mp4 https://raw.githubusercontent.com/imkevinabraham/traffic_analysis/master/traffic.mp4 2>/dev/null || true
+        cp traffic.mp4 python/traffic.mp4 2>/dev/null || true
     fi
     if [ -f "traffic.mp4" ]; then
         SOURCE="traffic.mp4"

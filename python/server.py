@@ -215,19 +215,19 @@ def get_placeholder_bytes():
         _placeholder_cache = b'\xff\xd8\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9'
         return _placeholder_cache
 
-def fetch_nvr_snapshot(camera_id, max_age=0.15):
+def fetch_nvr_snapshot(camera_id, max_age=0.2):
     """Fetch live JPEG snapshot from NVR or use AI-processed frame if available."""
     now = time.time()
     # If camera has AI processed frames that are fresh, prefer them
-    if camera_id in latest_frames and (now - latest_frame_times.get(camera_id, 0) < 3.0):
+    if camera_id in latest_frames and (now - latest_frame_times.get(camera_id, 0) < 6.0):
         return latest_frames[camera_id]
         
     # If in NVR cache within max_age, return cached snapshot
     if camera_id in nvr_frame_cache and (now - nvr_frame_cache_times.get(camera_id, 0) < max_age):
         return nvr_frame_cache[camera_id]
         
-    # If NVR connection recently failed, back off for 15 seconds to prevent thread blocking & spam
-    if now - nvr_fail_times.get(camera_id, 0) < 15.0:
+    # If NVR connection recently failed, back off for 60 seconds to prevent thread blocking & spam
+    if now - nvr_fail_times.get(camera_id, 0) < 60.0:
         return nvr_frame_cache.get(camera_id) or latest_frames.get(camera_id)
 
     ch_info = NVR_CHANNELS.get(camera_id)
@@ -237,7 +237,7 @@ def fetch_nvr_snapshot(camera_id, max_age=0.15):
     ch = ch_info['channel']
     url = f"http://{NVR_HOST}/ISAPI/Streaming/channels/{ch}/picture"
     try:
-        resp = nvr_session.get(url, timeout=1.0)
+        resp = nvr_session.get(url, timeout=0.4)
         if resp.status_code == 200 and resp.content:
             nvr_frame_cache[camera_id] = resp.content
             nvr_frame_cache_times[camera_id] = now
@@ -276,7 +276,7 @@ def generate_video_stream(camera_id):
     placeholder_bytes = get_placeholder_bytes()
 
     while True:
-        frame_bytes = fetch_nvr_snapshot(camera_id, max_age=0.12)
+        frame_bytes = fetch_nvr_snapshot(camera_id, max_age=0.15)
         if not frame_bytes:
             frame_bytes = placeholder_bytes
 
@@ -284,7 +284,7 @@ def generate_video_stream(camera_id):
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         
-        time.sleep(0.1)  # Limit to ~10 FPS for optimal bandwidth/performance
+        time.sleep(0.04)  # ~25 FPS smooth real-time stream
 
 @app.route('/api/camera/<int:camera_id>/stream')
 def get_camera_stream(camera_id):

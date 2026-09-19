@@ -10,6 +10,7 @@ __pycache__/
 
 # Ignore local binary files (Weights and Archives)
 *.pt
+*.mp4
 Archive.zip
 assets/img/vehicles/toll_plaza.png
 

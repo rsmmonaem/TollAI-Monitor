@@ -29,11 +29,10 @@ WORKDIR /app
 COPY python/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download a short sample traffic video for AI detection simulation in the cloud
+# Download sample traffic video for AI detection simulation in the cloud
 RUN mkdir -p python && \
-    (curl -L -o python/traffic.mp4 https://github.com/intel-iot-devkit/sample-videos/raw/master/free-way-traffic.mp4 || \
-     curl -L -o python/traffic.mp4 https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/free-way-traffic.mp4) && \
-    cp python/traffic.mp4 traffic.mp4 2>/dev/null || true
+    curl -L -o python/traffic.mp4 https://raw.githubusercontent.com/imkevinabraham/traffic_analysis/master/traffic.mp4 && \
+    cp python/traffic.mp4 traffic.mp4
 
 # Copy all project files into the container
 COPY . .
