@@ -244,8 +244,19 @@ def load_db_toll_rates(conn):
             cursor.execute("SELECT vehicle_type, rate_amount FROM toll_rates")
             rows = cursor.fetchall()
             if rows:
-                for v_type, rate_val in rows:
-                    TOLL_RATES[v_type] = int(rate_val)
+                for row in rows:
+                    if isinstance(row, dict):
+                        v_type = row.get('vehicle_type')
+                        rate_val = row.get('rate_amount')
+                    elif isinstance(row, (tuple, list)):
+                        v_type, rate_val = row[0], row[1]
+                    else:
+                        continue
+                    if v_type and rate_val is not None:
+                        try:
+                            TOLL_RATES[v_type] = int(float(rate_val))
+                        except (ValueError, TypeError):
+                            pass
                 logger.info("✅ Toll rates loaded from database")
         cursor.close()
     except Exception as e:

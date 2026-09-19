@@ -9,7 +9,10 @@ Usage:
     python demo_data_generator.py --dry-run   # print without DB insert
 """
 
-import mysql.connector
+try:
+    import mysql.connector
+except ImportError:
+    pass
 import random
 import string
 import argparse
@@ -327,9 +330,8 @@ def main():
         logger.info(f"✅ Successfully inserted {count} records!")
 
         conn.close()
-    except mysql.connector.Error as e:
+    except Exception as e:
         logger.error(f"❌ Database error: {e}")
-        logger.info("  → Tip: Update DB_CONFIG with your MySQL credentials")
 
 
 if __name__ == '__main__':
