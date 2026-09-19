@@ -292,13 +292,15 @@ def _ensure_sqlite_tables(conn):
         """)
         c.execute("""
             INSERT OR IGNORE INTO toll_rates (vehicle_type, rate_amount, effective_from, updated_by) VALUES
-                ('Bike',   5.00,  '2025-01-01', 'BRTA'),
-                ('CNG',    10.00, '2025-01-01', 'BRTA'),
-                ('Auto',   10.00, '2025-01-01', 'BRTA'),
-                ('Pickup', 20.00, '2025-01-01', 'BRTA'),
-                ('Bus',    50.00, '2025-01-01', 'BRTA'),
-                ('Truck',  50.00, '2025-01-01', 'BRTA'),
-                ('Lorry',  60.00, '2025-01-01', 'BRTA');
+                ('Bike',        5.00,  '2025-01-01', 'BRTA'),
+                ('CNG',         10.00, '2025-01-01', 'BRTA'),
+                ('Auto',        10.00, '2025-01-01', 'BRTA'),
+                ('Pickup',      20.00, '2025-01-01', 'BRTA'),
+                ('Car',         20.00, '2025-01-01', 'BRTA'),
+                ('Covered Van', 40.00, '2025-01-01', 'BRTA'),
+                ('Bus',         50.00, '2025-01-01', 'BRTA'),
+                ('Truck',       50.00, '2025-01-01', 'BRTA'),
+                ('Lorry',       60.00, '2025-01-01', 'BRTA');
         """)
         c.execute("""
             CREATE TABLE IF NOT EXISTS rate_audit_log (
@@ -347,10 +349,13 @@ def get_db_connection():
                 logger.info(f"MySQL unavailable ({e}). Using SQLite for data persistence.")
                 _mysql_failure_logged = True
             
-    # 2. SQLite fallback
+    # 2. SQLite fallback (for local development and Hugging Face Spaces persistence)
     db_path = Path(ROOT_DIR) / "toll_monitoring.db"
     try:
-        raw_conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        raw_conn = sqlite3.connect(str(db_path), timeout=30.0, check_same_thread=False)
+        raw_conn.execute("PRAGMA journal_mode=WAL;")
+        raw_conn.execute("PRAGMA synchronous=NORMAL;")
+        raw_conn.execute("PRAGMA busy_timeout=15000;")
         wrapped = SQLiteConnectionWrapper(raw_conn)
         _ensure_sqlite_tables(wrapped)
         return wrapped

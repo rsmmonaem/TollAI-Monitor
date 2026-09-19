@@ -630,10 +630,14 @@ def get_detections():
             
             # Format datetime
             for r in results:
-                r['entry_time'] = r['entry_time'].isoformat()
-                r['confidence'] = float(r['confidence'])
-                r['toll_amount'] = float(r['toll_amount'])
-                r['status'] = r['status'].replace('_', ' ').title()
+                if hasattr(r['entry_time'], 'isoformat'):
+                    r['entry_time'] = r['entry_time'].isoformat()
+                elif r.get('entry_time'):
+                    r['entry_time'] = str(r['entry_time'])
+                r['confidence'] = float(r.get('confidence') or 0.0)
+                r['toll_amount'] = float(r.get('toll_amount') or 0.0)
+                if 'status' in r and r['status']:
+                    r['status'] = str(r['status']).replace('_', ' ').title()
                 # Ensure a valid image path fallback if null
                 if not r.get('image_path'):
                     r['image_path'] = None
@@ -1064,16 +1068,28 @@ def get_report():
             cursor = conn.cursor(dictionary=True)
             
             # Query grouped summary for selected timeframe
-            query = """
-                SELECT 
-                    vehicle_type,
-                    COUNT(*) as count,
-                    COALESCE(SUM(toll_amount), 0) as revenue
-                FROM vehicle_detections
-                WHERE entry_time >= DATE_SUB(NOW(), INTERVAL %s DAY)
-                GROUP BY vehicle_type
-            """
-            cursor.execute(query, (days_back,))
+            if days_back == 0:
+                query = """
+                    SELECT 
+                        vehicle_type,
+                        COUNT(*) as count,
+                        COALESCE(SUM(toll_amount), 0) as revenue
+                    FROM vehicle_detections
+                    WHERE DATE(entry_time) = CURDATE()
+                    GROUP BY vehicle_type
+                """
+                cursor.execute(query)
+            else:
+                query = """
+                    SELECT 
+                        vehicle_type,
+                        COUNT(*) as count,
+                        COALESCE(SUM(toll_amount), 0) as revenue
+                    FROM vehicle_detections
+                    WHERE DATE(entry_time) >= SUBDATE(CURDATE(), %s)
+                    GROUP BY vehicle_type
+                """
+                cursor.execute(query, (days_back,))
             results = cursor.fetchall()
             
             # Get latest rates
