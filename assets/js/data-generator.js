@@ -207,9 +207,12 @@ window.AppData = {
       if (resp.ok) {
         const config = await resp.json();
         this.isBackend = true;
+        this.config = config;
+        this.cameras = config.cameras || [];
+        this.activeAiCameras = config.active_ai_cameras || [1, 2];
         await this.loadFromBackend();
         const dbStatusText = config.db_status === 'connected' ? 'MySQL Live' : 'Mock Fallback (DB Offline)';
-        console.log(`[DataGen] Integrated with Backend API (${dbStatusText}). Loaded ${this.records.length} records.`);
+        console.log(`[DataGen] Integrated with Backend API (${dbStatusText}). Loaded ${this.records.length} records. Found ${this.cameras.length} cameras.`);
         
         // Show inline banner in document if backend database is offline
         if (config.db_status === 'fallback') {
@@ -232,6 +235,22 @@ window.AppData = {
     this.hourly = Array.from({ length: 24 }, (_, i) => ({ hour: i, count: 0, revenue: 0 }));
     this.yesterdayHourly = Array.from({ length: 24 }, (_, i) => ({ hour: i, count: 0, revenue: 0 }));
     this.fraud = { data: {}, operatorRevenue: 0, aiRevenue: 0, leakage: 0 };
+    this.cameras = [
+      { id: 1, name: 'Camera 1 (Ch 101 - Toll Lane A)', lane: 'Toll Lane A (Inbound)', channel: '101', ai_enabled: true },
+      { id: 2, name: 'Camera 2 (Ch 201 - Toll Lane B)', lane: 'Toll Lane B (Outbound)', channel: '201', ai_enabled: false },
+      { id: 3, name: 'Camera 3 (Ch 301 - Lane C Entry)', lane: 'Toll Lane C (Inbound)', channel: '301', ai_enabled: false },
+      { id: 4, name: 'Camera 4 (Ch 401 - Lane D Exit)', lane: 'Toll Lane D (Outbound)', channel: '401', ai_enabled: false },
+      { id: 5, name: 'Camera 5 (Ch 501 - Plaza Approach)', lane: 'Plaza Approach North', channel: '501', ai_enabled: false },
+      { id: 6, name: 'Camera 6 (Ch 601 - Plaza Departure)', lane: 'Plaza Departure South', channel: '601', ai_enabled: false },
+      { id: 7, name: 'Camera 7 (Ch 701 - Heavy Vehicle Lane)', lane: 'Heavy Vehicle Lane', channel: '701', ai_enabled: false },
+      { id: 8, name: 'Camera 8 (Ch 801 - FastPass / ETC 1)', lane: 'ETC FastPass Lane 1', channel: '801', ai_enabled: false },
+      { id: 9, name: 'Camera 9 (Ch 901 - FastPass / ETC 2)', lane: 'ETC FastPass Lane 2', channel: '901', ai_enabled: false },
+      { id: 10, name: 'Camera 10 (Ch 1001 - Weighbridge A)', lane: 'Weighbridge Lane 1', channel: '1001', ai_enabled: false },
+      { id: 11, name: 'Camera 11 (Ch 1101 - Booth 1 Cabin)', lane: 'Toll Booth 1', channel: '1101', ai_enabled: false },
+      { id: 12, name: 'Camera 12 (Ch 1201 - Booth 2 Cabin)', lane: 'Toll Booth 2', channel: '1201', ai_enabled: false },
+      { id: 13, name: 'Camera 13 (Ch 1301 - Plaza Overview)', lane: 'Main Plaza Yard', channel: '1301', ai_enabled: false },
+      { id: 14, name: 'Camera 14 (Ch 1501 - Perimeter Security)', lane: 'Perimeter Guard Post', channel: '1501', ai_enabled: false },
+    ];
     console.log('[DataGen] Client-side fallback active. Mock data disabled.');
   },
 

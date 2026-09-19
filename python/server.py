@@ -17,6 +17,9 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 from PIL import Image
+import requests
+from requests.auth import HTTPDigestAuth
+from requests.adapters import HTTPAdapter
 from flask import Flask, jsonify, request, send_from_directory, Response
 from flask_cors import CORS
 
@@ -33,6 +36,8 @@ CORS(app) # Enable CORS for development cross-origin requests
 # Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger('TollServer')
+logging.getLogger('werkzeug').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.ERROR)
 
 # Database Status
 db_status = 'fallback'
@@ -128,15 +133,125 @@ def serve_captured_vehicles(filename):
     return send_from_directory(os.path.join(ROOT_DIR, 'captured_vehicles'), filename)
 
 # ─────────────────────────────────────────────────────────────
-# LIVE CAMERA VIDEO STREAMING
+# LIVE CAMERA VIDEO STREAMING & 14-CHANNEL NVR PROXY
 # ─────────────────────────────────────────────────────────────
 
-# In-memory store for the latest JPEG frame of each camera
+NVR_HOST = os.environ.get('NVR_HOST', '103.79.179.116')
+NVR_USER = os.environ.get('NVR_USER', 'admin')
+NVR_PASS = os.environ.get('NVR_PASS', 'nurbio2026')
+
+NVR_CHANNELS = {
+    1: {'channel': '101', 'name': 'Camera 1 (Ch 101 - Toll Lane A)', 'lane': 'Toll Lane A (Inbound)'},
+    2: {'channel': '201', 'name': 'Camera 2 (Ch 201 - Toll Lane B)', 'lane': 'Toll Lane B (Outbound)'},
+    3: {'channel': '301', 'name': 'Camera 3 (Ch 301 - Lane C Entry)', 'lane': 'Toll Lane C (Inbound)'},
+    4: {'channel': '401', 'name': 'Camera 4 (Ch 401 - Lane D Exit)', 'lane': 'Toll Lane D (Outbound)'},
+    5: {'channel': '501', 'name': 'Camera 5 (Ch 501 - Plaza Approach)', 'lane': 'Plaza Approach North'},
+    6: {'channel': '601', 'name': 'Camera 6 (Ch 601 - Plaza Departure)', 'lane': 'Plaza Departure South'},
+    7: {'channel': '701', 'name': 'Camera 7 (Ch 701 - Heavy Vehicle Lane)', 'lane': 'Heavy Vehicle Lane'},
+    8: {'channel': '801', 'name': 'Camera 8 (Ch 801 - FastPass / ETC 1)', 'lane': 'ETC FastPass Lane 1'},
+    9: {'channel': '901', 'name': 'Camera 9 (Ch 901 - FastPass / ETC 2)', 'lane': 'ETC FastPass Lane 2'},
+    10: {'channel': '1001', 'name': 'Camera 10 (Ch 1001 - Weighbridge A)', 'lane': 'Weighbridge Lane 1'},
+    11: {'channel': '1101', 'name': 'Camera 11 (Ch 1101 - Booth 1 Cabin)', 'lane': 'Toll Booth 1'},
+    12: {'channel': '1201', 'name': 'Camera 12 (Ch 1201 - Booth 2 Cabin)', 'lane': 'Toll Booth 2'},
+    13: {'channel': '1301', 'name': 'Camera 13 (Ch 1301 - Plaza Overview)', 'lane': 'Main Plaza Yard'},
+    14: {'channel': '1501', 'name': 'Camera 14 (Ch 1501 - Perimeter Security)', 'lane': 'Perimeter Guard Post'},
+}
+
+# Active AI Cameras Multi-Select State
+def _parse_active_cams(val):
+    if not val:
+        return [1, 2]
+    if str(val).strip().lower() == 'all':
+        return list(range(1, len(NVR_CHANNELS) + 1))
+    cams = []
+    for p in str(val).split(','):
+        p = p.strip()
+        if p.isdigit():
+            cid = int(p)
+            if 1 <= cid <= len(NVR_CHANNELS):
+                cams.append(cid)
+    return sorted(list(set(cams))) if cams else [1, 2]
+
+active_ai_cameras = _parse_active_cams(os.environ.get('ACTIVE_CAMERAS', '1,2'))
+
+nvr_session = requests.Session()
+nvr_session.auth = HTTPDigestAuth(NVR_USER, NVR_PASS)
+nvr_session.mount('http://', HTTPAdapter(pool_connections=25, pool_maxsize=25, max_retries=0))
+
+# In-memory store for the latest JPEG frame of each camera (from AI engine)
 latest_frames = {}
+latest_frame_times = {}
+nvr_frame_cache = {}
+nvr_frame_cache_times = {}
+nvr_fail_times = {}
+
+_placeholder_cache = None
+
+def get_placeholder_bytes():
+    global _placeholder_cache
+    if _placeholder_cache:
+        return _placeholder_cache
+    placeholder_path = os.path.join(ROOT_DIR, 'assets', 'img', 'vehicles', 'toll_plaza.png')
+    if os.path.exists(placeholder_path):
+        try:
+            im = Image.open(placeholder_path)
+            if im.mode in ('RGBA', 'LA') or (im.mode == 'P' and 'transparency' in im.info):
+                im = im.convert('RGB')
+            out = BytesIO()
+            im.save(out, format='JPEG', quality=80)
+            _placeholder_cache = out.getvalue()
+            return _placeholder_cache
+        except Exception as e:
+            logger.error(f"Error converting placeholder to JPEG: {e}")
+            
+    try:
+        # Generate a 640x360 dark slate frame dynamically
+        im = Image.new('RGB', (640, 360), color='#0f172a')
+        out = BytesIO()
+        im.save(out, format='JPEG', quality=75)
+        _placeholder_cache = out.getvalue()
+        return _placeholder_cache
+    except Exception:
+        _placeholder_cache = b'\xff\xd8\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9'
+        return _placeholder_cache
+
+def fetch_nvr_snapshot(camera_id, max_age=0.15):
+    """Fetch live JPEG snapshot from NVR or use AI-processed frame if available."""
+    now = time.time()
+    # If camera has AI processed frames that are fresh, prefer them
+    if camera_id in latest_frames and (now - latest_frame_times.get(camera_id, 0) < 3.0):
+        return latest_frames[camera_id]
+        
+    # If in NVR cache within max_age, return cached snapshot
+    if camera_id in nvr_frame_cache and (now - nvr_frame_cache_times.get(camera_id, 0) < max_age):
+        return nvr_frame_cache[camera_id]
+        
+    # If NVR connection recently failed, back off for 15 seconds to prevent thread blocking & spam
+    if now - nvr_fail_times.get(camera_id, 0) < 15.0:
+        return nvr_frame_cache.get(camera_id) or latest_frames.get(camera_id)
+
+    ch_info = NVR_CHANNELS.get(camera_id)
+    if not ch_info:
+        return latest_frames.get(camera_id)
+        
+    ch = ch_info['channel']
+    url = f"http://{NVR_HOST}/ISAPI/Streaming/channels/{ch}/picture"
+    try:
+        resp = nvr_session.get(url, timeout=1.0)
+        if resp.status_code == 200 and resp.content:
+            nvr_frame_cache[camera_id] = resp.content
+            nvr_frame_cache_times[camera_id] = now
+            return resp.content
+    except Exception as e:
+        nvr_fail_times[camera_id] = now
+        logger.debug(f"Snapshot fetch error for camera {camera_id}: {e}")
+        
+    return nvr_frame_cache.get(camera_id) or latest_frames.get(camera_id)
 
 @app.route('/api/camera/<int:camera_id>/frame', methods=['POST'])
 def upload_camera_frame(camera_id):
     latest_frames[camera_id] = request.data
+    latest_frame_times[camera_id] = time.time()
     return jsonify({'success': True})
 
 # In-memory store for raw client webcam uploads (for remote AI processing)
@@ -158,39 +273,18 @@ def download_raw_frame(camera_id):
     return jsonify({'error': 'No recent raw frame'}), 404
 
 def generate_video_stream(camera_id):
-    placeholder_path = os.path.join(ROOT_DIR, 'assets', 'img', 'vehicles', 'toll_plaza.png')
-    placeholder_bytes = None
-    if os.path.exists(placeholder_path):
-        try:
-            im = Image.open(placeholder_path)
-            if im.mode in ('RGBA', 'LA') or (im.mode == 'P' and 'transparency' in im.info):
-                im = im.convert('RGB')
-            out = BytesIO()
-            im.save(out, format='JPEG', quality=80)
-            placeholder_bytes = out.getvalue()
-        except Exception as e:
-            logger.error(f"Error converting placeholder to JPEG: {e}")
-            
-    if not placeholder_bytes:
-        try:
-            # Generate a 640x360 black frame dynamically to prevent connection timeouts
-            im = Image.new('RGB', (640, 360), color='#0f172a')  # Match dashboard theme dark slate
-            out = BytesIO()
-            im.save(out, format='JPEG', quality=75)
-            placeholder_bytes = out.getvalue()
-        except Exception:
-            placeholder_bytes = b'\xff\xd8\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9'
+    placeholder_bytes = get_placeholder_bytes()
 
     while True:
-        frame_bytes = latest_frames.get(camera_id)
+        frame_bytes = fetch_nvr_snapshot(camera_id, max_age=0.12)
+        if not frame_bytes:
+            frame_bytes = placeholder_bytes
+
         if frame_bytes:
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        elif placeholder_bytes:
-            # If no camera stream is active, stream the static placeholder image as JPEG
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + placeholder_bytes + b'\r\n')
-        time.sleep(0.1)  # Limit to 10 FPS to save CPU / bandwidth
+        
+        time.sleep(0.1)  # Limit to ~10 FPS for optimal bandwidth/performance
 
 @app.route('/api/camera/<int:camera_id>/stream')
 def get_camera_stream(camera_id):
@@ -198,6 +292,72 @@ def get_camera_stream(camera_id):
         generate_video_stream(camera_id),
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
+
+@app.route('/api/camera/<int:camera_id>/snapshot')
+def get_camera_snapshot(camera_id):
+    snap = fetch_nvr_snapshot(camera_id, max_age=0.4)
+    if snap:
+        return Response(snap, mimetype='image/jpeg', headers={'Cache-Control': 'no-cache, no-store, must-revalidate'})
+    placeholder_bytes = get_placeholder_bytes()
+    return Response(placeholder_bytes, mimetype='image/jpeg', headers={'Cache-Control': 'no-cache'})
+
+@app.route('/api/camera/channels')
+def get_camera_channels():
+    cams = [
+        {
+            'id': cam_id,
+            'name': info['name'],
+            'lane': info['lane'],
+            'channel': info['channel'],
+            'stream_url': f'/api/camera/{cam_id}/stream',
+            'snapshot_url': f'/api/camera/{cam_id}/snapshot',
+            'ai_enabled': (cam_id in active_ai_cameras)
+        }
+        for cam_id, info in NVR_CHANNELS.items()
+    ]
+    return jsonify(cams)
+
+# ─────────────────────────────────────────────────────────────
+# AI ENGINE CAMERA MULTI-SELECT ENDPOINT
+# ─────────────────────────────────────────────────────────────
+
+@app.route('/api/ai/cameras', methods=['GET', 'POST'])
+def manage_ai_cameras():
+    global active_ai_cameras
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        if 'toggle' in data:
+            try:
+                cid = int(data['toggle'])
+                if cid in active_ai_cameras:
+                    active_ai_cameras.remove(cid)
+                elif 1 <= cid <= len(NVR_CHANNELS):
+                    active_ai_cameras.append(cid)
+                    active_ai_cameras.sort()
+            except Exception as e:
+                return jsonify({'error': str(e)}), 400
+        elif 'cameras' in data:
+            raw_cams = data.get('cameras', [])
+            cleaned = []
+            for c in raw_cams:
+                if str(c).isdigit():
+                    cid = int(c)
+                    if 1 <= cid <= len(NVR_CHANNELS):
+                        cleaned.append(cid)
+            active_ai_cameras = sorted(list(set(cleaned)))
+            
+        logger.info(f"Updated active AI Cameras: {active_ai_cameras}")
+        return jsonify({
+            'success': True,
+            'active_cameras': active_ai_cameras,
+            'count': len(active_ai_cameras)
+        })
+
+    return jsonify({
+        'active_cameras': active_ai_cameras,
+        'count': len(active_ai_cameras),
+        'total_available': len(NVR_CHANNELS)
+    })
 
 # ─────────────────────────────────────────────────────────────
 # REST API ENDPOINTS
@@ -211,11 +371,26 @@ def get_config():
         if check_db_health():
             db_status = 'connected'
             
+    cameras_list = [
+        {
+            'id': cam_id,
+            'name': info['name'],
+            'lane': info['lane'],
+            'channel': info['channel'],
+            'stream_url': f'/api/camera/{cam_id}/stream',
+            'snapshot_url': f'/api/camera/{cam_id}/snapshot',
+            'ai_enabled': (cam_id in active_ai_cameras)
+        }
+        for cam_id, info in NVR_CHANNELS.items()
+    ]
     return jsonify({
         'db_status': db_status,
         'db_host': DB_CONFIG['host'],
         'db_database': DB_CONFIG['database'],
-        'camera_ids': [1, 2]
+        'camera_ids': list(NVR_CHANNELS.keys()),
+        'cameras': cameras_list,
+        'active_ai_cameras': active_ai_cameras,
+        'total_cameras': len(NVR_CHANNELS)
     })
 
 @app.route('/api/stats', methods=['GET'])
@@ -326,6 +501,27 @@ def get_detections():
             'entry_time': r['entry_time'].isoformat()
         })
     return jsonify(formatted)
+
+@app.route('/api/detections', methods=['DELETE'])
+def delete_detections():
+    conn = get_db_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM vehicle_detections")
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return jsonify({'success': True, 'message': 'All detection logs deleted.'})
+        except Exception as e:
+            logger.error(f"Error deleting detections: {e}")
+            if conn: conn.close()
+            return jsonify({'success': False, 'message': str(e)}), 500
+            
+    # Fallback
+    global mock_records
+    mock_records.clear()
+    return jsonify({'success': True, 'message': 'All fallback detection logs deleted.'})
 
 @app.route('/api/charts/distribution', methods=['GET'])
 def get_chart_distribution():
@@ -807,5 +1003,6 @@ def get_report():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     logger.info(f"Serving AI Toll Monitor web files from: {ROOT_DIR}")
-    logger.info("Starting Flask server on http://localhost:5001")
+    logger.info(f"Starting Flask server on http://localhost:{port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+

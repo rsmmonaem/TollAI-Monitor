@@ -84,6 +84,8 @@ class SQLiteCursorWrapper:
         # SQLite integer autoincrement format
         q = re.sub(r'INT AUTO_INCREMENT PRIMARY KEY', 'INTEGER PRIMARY KEY AUTOINCREMENT', q, flags=re.IGNORECASE)
         q = re.sub(r'TINYINT', 'INTEGER', q, flags=re.IGNORECASE)
+        q = re.sub(r'ENUM\([^)]+\)', 'TEXT', q, flags=re.IGNORECASE)
+        q = re.sub(r'UNIQUE\s+KEY(\s+\w+)?\s*(\([^)]+\))', r'UNIQUE \2', q, flags=re.IGNORECASE)
         
         # Remove MySQL Index declarations inside CREATE TABLE (SQLite creates indexes separately)
         # We only remove indices inside CREATE TABLE definitions
@@ -102,6 +104,8 @@ class SQLiteCursorWrapper:
         q = q.replace('HOUR(entry_time)', "cast(strftime('%H', entry_time) as integer)")
         q = re.sub(r'DATE_SUB\(NOW\(\),\s*INTERVAL\s+(\?|:\w+|\d+)\s+DAY\)', r"datetime('now', 'localtime', '-' || \1 || ' days')", q, flags=re.IGNORECASE)
         q = re.sub(r'DATE_SUB\(NOW\(\),\s*INTERVAL\s+(\?|:\w+|\d+)\s+HOUR\)', r"datetime('now', 'localtime', '-' || \1 || ' hours')", q, flags=re.IGNORECASE)
+        q = re.sub(r'NOW\(\)\s*-\s*INTERVAL\s+(\?|:\w+|\d+)\s+SECOND', r"datetime('now', 'localtime', '-' || \1 || ' seconds')", q, flags=re.IGNORECASE)
+        q = re.sub(r'NOW\(\)', "datetime('now', 'localtime')", q, flags=re.IGNORECASE)
         
         # 5. ON DUPLICATE KEY UPDATE -> ON CONFLICT
         # Specifically for toll_rates updates
@@ -113,7 +117,10 @@ class SQLiteCursorWrapper:
                 flags=re.IGNORECASE
             )
             
-        # 6. SQLite doesn't support SHOW TABLES LIKE
+        # 6. INSERT IGNORE -> INSERT OR IGNORE
+        q = re.sub(r'INSERT\s+IGNORE\s+INTO', 'INSERT OR IGNORE INTO', q, flags=re.IGNORECASE)
+
+        # 7. SQLite doesn't support SHOW TABLES LIKE
         if "SHOW TABLES LIKE" in q:
             # "SHOW TABLES LIKE 'toll_rates'" -> "SELECT name FROM sqlite_master WHERE type='table' AND name='toll_rates'"
             table_match = re.search(r"LIKE\s+'([^']+)'", q, flags=re.IGNORECASE)
@@ -136,6 +143,12 @@ class SQLiteConnectionWrapper:
 
     def close(self):
         self.conn.close()
+
+    def is_connected(self):
+        return self.conn is not None
+
+    def ping(self, reconnect=True):
+        return True
 
 def get_db_connection():
     """Returns a connection. Tries MySQL first, falls back to SQLite."""

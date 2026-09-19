@@ -53,32 +53,25 @@ const WebcamModule = (() => {
 
         container.appendChild(video);
 
+        // Display local webcam video directly on top of the container
+        video.style.position = 'absolute';
+        video.style.top = '0';
+        video.style.left = '0';
+        video.style.width = '100%';
+        video.style.height = '100%';
+        video.style.objectFit = 'cover';
+        video.style.zIndex = '2';
+        video.style.display = 'block';
+        video.style.borderRadius = '0.5rem';
+
         const isBackendOnline = window.AppData && window.AppData.isBackend;
         if (isBackendOnline) {
-          // ONLINE: Keep video hidden, use it to capture frames and post to backend,
-          // then reload the MJPEG image stream to ensure it connects.
-          video.style.position = 'absolute';
-          video.style.width = '1px';
-          video.style.height = '1px';
-          video.style.opacity = '0';
-          video.style.pointerEvents = 'none';
-
-          // Force reload the MJPEG streams
+          // Force reload the MJPEG stream behind/alongside
           const timestamp = Date.now();
           const imgOverview = document.getElementById(`cam${cameraId}-img`);
           const imgFull = document.getElementById(`cam${cameraId}f-img`);
           if (imgOverview) imgOverview.src = `/api/camera/${cameraId}/stream?t=${timestamp}`;
           if (imgFull) imgFull.src = `/api/camera/${cameraId}/stream?t=${timestamp}`;
-        } else {
-          // OFFLINE: Display local webcam video directly on top of the static image
-          video.style.position = 'absolute';
-          video.style.top = '0';
-          video.style.left = '0';
-          video.style.width = '100%';
-          video.style.height = '100%';
-          video.style.objectFit = 'cover';
-          video.style.zIndex = '2';
-          video.style.display = 'block';
         }
       }
 

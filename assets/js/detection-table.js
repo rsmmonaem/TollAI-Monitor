@@ -251,3 +251,24 @@ const DetectionTable = (() => {
     stop: stopLiveFeed
   };
 })();
+
+window.clearDetectionLogs = async function() {
+  if (!confirm('Are you sure you want to clear all vehicle detection logs?')) return;
+  
+  try {
+    const resp = await fetch('/api/detections', { method: 'DELETE' });
+    const data = await resp.json();
+    if (data.success) {
+      document.getElementById('detection-tbody').innerHTML = '';
+      document.getElementById('detection-tbody-full').innerHTML = '';
+      const badge = document.getElementById('live-count-badge');
+      if (badge) badge.textContent = `0 detected today`;
+      alert('Detection logs cleared successfully!');
+    } else {
+      alert('Failed to clear logs: ' + data.message);
+    }
+  } catch (e) {
+    console.error('Error clearing logs:', e);
+    alert('An error occurred while clearing logs.');
+  }
+};

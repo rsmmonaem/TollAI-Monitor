@@ -9,7 +9,7 @@ __pycache__/
 *.pyd
 
 # Ignore local binary files (Weights and Archives)
-yolov8n.pt
+*.pt
 Archive.zip
 assets/img/vehicles/toll_plaza.png
 

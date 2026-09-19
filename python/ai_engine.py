@@ -13,11 +13,26 @@ Usage:
 """
 
 import cv2
-import easyocr
+try:
+    import easyocr
+    EASYOCR_AVAILABLE = True
+except ImportError:
+    EASYOCR_AVAILABLE = False
+    easyocr = None
 import mysql.connector
 import urllib.request
+import urllib.parse
+import threading
+import queue
+import json
+import requests
+from requests.auth import HTTPDigestAuth
+import urllib3
+urllib3.disable_warnings()
 import numpy as np
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import re
 import time
 import argparse
@@ -31,25 +46,53 @@ from ultralytics import YOLO
 # ─────────────────────────────────────────────────────────────
 
 DB_CONFIG = {
-    'host':     'localhost',
-    'port':     3306,
-    'database': 'toll_monitoring',
-    'user':     'root',
-    'password': ''
+    'host':     os.environ.get('DB_HOST', 'localhost'),
+    'port':     int(os.environ.get('DB_PORT', 3306)),
+    'database': os.environ.get('DB_NAME', 'toll_monitoring'),
+    'user':     os.environ.get('DB_USER', 'root'),
+    'password': os.environ.get('DB_PASSWORD', '')
 }
 
 # Output directory for saved vehicle images
 OUTPUT_DIR = Path('captured_vehicles')
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# Camera ID (change per deployment)
+# NVR Configuration and Channel Mapping (14 Channels)
+NVR_HOST = os.environ.get('NVR_HOST', '103.79.179.116')
+NVR_USER = os.environ.get('NVR_USER', 'admin')
+NVR_PASS = os.environ.get('NVR_PASS', 'nurbio2026')
+
+NVR_CHANNELS = {
+    1: {'channel': '101', 'name': 'Camera 1 (Ch 101 - Toll Lane A)', 'lane': 'Toll Lane A (Inbound)'},
+    2: {'channel': '201', 'name': 'Camera 2 (Ch 201 - Toll Lane B)', 'lane': 'Toll Lane B (Outbound)'},
+    3: {'channel': '301', 'name': 'Camera 3 (Ch 301 - Lane C Entry)', 'lane': 'Toll Lane C (Inbound)'},
+    4: {'channel': '401', 'name': 'Camera 4 (Ch 401 - Lane D Exit)', 'lane': 'Toll Lane D (Outbound)'},
+    5: {'channel': '501', 'name': 'Camera 5 (Ch 501 - Plaza Approach)', 'lane': 'Plaza Approach North'},
+    6: {'channel': '601', 'name': 'Camera 6 (Ch 601 - Plaza Departure)', 'lane': 'Plaza Departure South'},
+    7: {'channel': '701', 'name': 'Camera 7 (Ch 701 - Heavy Vehicle Lane)', 'lane': 'Heavy Vehicle Lane'},
+    8: {'channel': '801', 'name': 'Camera 8 (Ch 801 - FastPass / ETC 1)', 'lane': 'ETC FastPass Lane 1'},
+    9: {'channel': '901', 'name': 'Camera 9 (Ch 901 - FastPass / ETC 2)', 'lane': 'ETC FastPass Lane 2'},
+    10: {'channel': '1001', 'name': 'Camera 10 (Ch 1001 - Weighbridge A)', 'lane': 'Weighbridge Lane 1'},
+    11: {'channel': '1101', 'name': 'Camera 11 (Ch 1101 - Booth 1 Cabin)', 'lane': 'Toll Booth 1'},
+    12: {'channel': '1201', 'name': 'Camera 12 (Ch 1201 - Booth 2 Cabin)', 'lane': 'Toll Booth 2'},
+    13: {'channel': '1301', 'name': 'Camera 13 (Ch 1301 - Plaza Overview)', 'lane': 'Main Plaza Yard'},
+    14: {'channel': '1501', 'name': 'Camera 14 (Ch 1501 - Perimeter Security)', 'lane': 'Perimeter Guard Post'},
+}
+
+# Default Active Camera ID (backward compatibility)
 CAMERA_ID = 1
 
 # Confidence threshold for YOLO detections
 YOLO_CONF_THRESHOLD = 0.45
 
-# Detection cooldown per plate (seconds) — prevents duplicate entries
-PLATE_COOLDOWN = 8
+# Detection cooldown per plate (seconds) — prevents duplicate entries for known plates
+PLATE_COOLDOWN = 30
+
+# Spatial cooldown window (seconds) — prevents duplicates for same vehicle standing still
+SPATIAL_COOLDOWN = 30
+
+# Grid cell size for spatial deduplication (fraction of frame width/height)
+SPATIAL_GRID_CELLS = 8  # divide frame into 8x8 zones
 
 # YOLO vehicle class IDs (COCO dataset)
 VEHICLE_CLASS_IDS = {
@@ -146,6 +189,43 @@ def init_database(conn):
             leakage_amount  DECIMAL(10,2) DEFAULT 0.00,
             created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uq_date_type (report_date, vehicle_type)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """)
+
+    # Toll rates table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS toll_rates (
+            id              INT AUTO_INCREMENT PRIMARY KEY,
+            vehicle_type    VARCHAR(50)   NOT NULL UNIQUE,
+            rate_amount     DECIMAL(8,2)  NOT NULL DEFAULT 0.00,
+            effective_from  DATE          NOT NULL,
+            updated_by      VARCHAR(100)  DEFAULT 'System',
+            updated_at      TIMESTAMP     DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """)
+
+    # Default rates
+    cursor.execute("""
+        INSERT IGNORE INTO toll_rates (vehicle_type, rate_amount, effective_from, updated_by) VALUES
+            ('Bike',   5.00,  '2025-01-01', 'BRTA'),
+            ('CNG',    10.00, '2025-01-01', 'BRTA'),
+            ('Auto',   10.00, '2025-01-01', 'BRTA'),
+            ('Pickup', 20.00, '2025-01-01', 'BRTA'),
+            ('Bus',    50.00, '2025-01-01', 'BRTA'),
+            ('Truck',  50.00, '2025-01-01', 'BRTA'),
+            ('Lorry',  60.00, '2025-01-01', 'BRTA');
+    """)
+
+    # Rate audit log table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rate_audit_log (
+            id              INT AUTO_INCREMENT PRIMARY KEY,
+            vehicle_type    VARCHAR(50)   NOT NULL,
+            old_rate        DECIMAL(8,2)  NOT NULL,
+            new_rate        DECIMAL(8,2)  NOT NULL,
+            changed_by      VARCHAR(100)  DEFAULT 'Admin',
+            changed_at      TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+            reason          TEXT          DEFAULT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """)
 
@@ -336,18 +416,35 @@ def draw_hud(frame, fps: float, total_today: int, total_revenue: int):
 # ─────────────────────────────────────────────────────────────
 
 class TollAIEngine:
-    def __init__(self, source, model_path: str = 'yolov8n.pt', show_window: bool = True):
+    def __init__(self, source, model_path: str = 'yolov8s.pt', show_window: bool = True, camera_ids=None):
         self.source = source
         self.show_window = show_window
-        self.port = int(os.environ.get('PORT', 5001))
+        self.port = int(os.environ.get('PORT', 5002))
+
+        # Camera multi-select set
+        if camera_ids is not None:
+            self.camera_ids = set(camera_ids)
+        else:
+            self.camera_ids = {1, 2}
+
+        self.model_lock = threading.Lock()
+        self.running = True
 
         # Load YOLO model
         logger.info(f"Loading YOLO model: {model_path}")
         self.model = YOLO(model_path)
 
         # EasyOCR reader (Bengali + English)
-        logger.info("Initializing EasyOCR (bn, en)...")
-        self.ocr = easyocr.Reader(['bn', 'en'], gpu=False, verbose=False)
+        if EASYOCR_AVAILABLE:
+            try:
+                logger.info("Initializing EasyOCR (bn, en)...")
+                self.ocr = easyocr.Reader(['bn', 'en'], gpu=False, verbose=False)
+            except Exception as e:
+                logger.warning(f"EasyOCR initialization failed: {e}")
+                self.ocr = None
+        else:
+            logger.info("EasyOCR not available, skipping OCR initialization.")
+            self.ocr = None
 
         # Database
         self.conn = get_db_connection()
@@ -356,7 +453,10 @@ class TollAIEngine:
             load_db_toll_rates(self.conn)
 
         # State
-        self.plate_last_seen: dict[str, float] = {}
+        self.plate_last_seen: dict[str, float] = {}   # plate_text -> last insert timestamp
+        self.plate_last_bbox: dict[str, list] = {}    # plate_text -> last bbox [x1,y1,x2,y2]
+        self.spatial_last_seen: dict[str, float] = {} # spatial_cell_key -> last insert timestamp
+        self.plate_cache: dict[int, tuple[str, float]] = {}  # track_id -> (plate_text, conf)
         self.total_today = 0
         self.total_revenue = 0
         self.fps_counter = 0
@@ -364,14 +464,123 @@ class TollAIEngine:
         self.current_fps = 0.0
         self.last_webcam_frame_time = 0.0
 
-    def _is_duplicate(self, plate: str) -> bool:
-        """Check if this plate was seen recently (cooldown window)."""
+        # Background DB and disk write worker (prevents I/O blocking the real-time video loop)
+        self.db_queue = queue.Queue(maxsize=200)
+        self.db_thread = threading.Thread(target=self._db_worker, daemon=True)
+        self.db_thread.start()
+
+    def _sync_cameras_worker(self):
+        """Polls Flask /api/ai/cameras every 3 seconds to dynamically sync selected cameras from UI."""
+        while self.running:
+            try:
+                url = f"http://localhost:{self.port}/api/ai/cameras"
+                req = urllib.request.Request(url)
+                with urllib.request.urlopen(req, timeout=1.0) as res:
+                    if res.status == 200:
+                        data = json.loads(res.read().decode())
+                        active = data.get('active_cameras')
+                        if active and isinstance(active, list):
+                            new_cams = set(int(x) for x in active if 1 <= int(x) <= len(NVR_CHANNELS))
+                            if new_cams and new_cams != self.camera_ids:
+                                logger.info(f"🔄 AI Engine active cameras dynamically updated: {sorted(list(new_cams))}")
+                                self.camera_ids = new_cams
+            except Exception:
+                pass
+            time.sleep(3.0)
+
+    def _db_worker(self):
+        """Asynchronously writes captured vehicle images to disk and logs records to database."""
+        while True:
+            item = self.db_queue.get()
+            if item is None:
+                break
+            frame, vehicle_type, plate_text, camera_id, conf, toll, plate_conf, status = item
+            try:
+                img_path = self._save_image(frame, vehicle_type, plate_text, camera_id)
+                record = {
+                    'vehicle_type': vehicle_type,
+                    'plate_number': plate_text,
+                    'image_path':   img_path,
+                    'camera_id':    camera_id,
+                    'entry_time':   datetime.now(),
+                    'confidence':   round(conf * 100, 2),
+                    'toll_amount':  toll,
+                    'plate_conf':   round(plate_conf, 2),
+                    'status':       status,
+                }
+                if self.conn and self.conn.is_connected():
+                    rec_id = insert_detection(self.conn, record)
+                    logger.info(f"[#{rec_id}] {vehicle_type:10} | Plate: {plate_text:20} | "
+                                f"Conf: {conf:.1%} | Toll: {toll}Tk | {img_path}")
+            except Exception as e:
+                logger.warning(f"Error in async DB worker: {e}")
+            finally:
+                self.db_queue.task_done()
+
+    def _spatial_key(self, bbox: list, frame_w: int = 640, frame_h: int = 360) -> str:
+        """Map a bounding box to a spatial grid cell key to identify stationary vehicles."""
+        cx = (bbox[0] + bbox[2]) / 2  # center x
+        cy = (bbox[1] + bbox[3]) / 2  # center y
+        cell_x = int(cx / frame_w * SPATIAL_GRID_CELLS)
+        cell_y = int(cy / frame_h * SPATIAL_GRID_CELLS)
+        return f"cell_{cell_x}_{cell_y}"
+
+    def _is_duplicate(self, plate: str, bbox: list) -> bool:
+        """Three-layer deduplication:
+        1. Known plate cooldown (including UNKNOWN-T tracked plates)
+        2. Spatial cell lock for UNKNOWN-Z plates (tracker fallback)
+        """
         now = time.time()
+        
+        # Only use spatial fallback if the plate is UNKNOWN-Z (meaning tracker failed)
+        if plate.startswith('UNKNOWN-Z'):
+            cell_key = self._spatial_key(bbox)
+            if cell_key in self.spatial_last_seen:
+                if now - self.spatial_last_seen[cell_key] < SPATIAL_COOLDOWN:
+                    return True  # same zone, same standing vehicle
+            self.spatial_last_seen[cell_key] = now
+            return False
+
+        # For known plates, run the plate cooldown check
         if plate in self.plate_last_seen:
             if now - self.plate_last_seen[plate] < PLATE_COOLDOWN:
-                return True
+                return True  # same plate within cooldown window
+
+        # Also check spatial zone — catches same car re-read with slightly different OCR
+        cell_key = self._spatial_key(bbox)
+        if cell_key in self.spatial_last_seen:
+            if now - self.spatial_last_seen[cell_key] < SPATIAL_COOLDOWN:
+                return True  # same zone occupied — treat as same vehicle
+
+        # Clear to insert — record timestamps
         self.plate_last_seen[plate] = now
+        self.spatial_last_seen[cell_key] = now
+
+        # Layer 4: DB-backed check — survives restarts and multi-process deployments
+        if self._db_dedup_check(plate, PLATE_COOLDOWN):
+            return True
+
         return False
+
+    def _db_dedup_check(self, plate: str, cooldown_seconds: int) -> bool:
+        """Persistent DB-backed duplicate check.
+        Returns True (duplicate) if same plate was inserted within cooldown_seconds.
+        Falls back gracefully if DB unavailable.
+        """
+        if not self.conn or plate.startswith('UNKNOWN-Z'):
+            return False
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM vehicle_detections
+                WHERE plate_number = %s
+                  AND entry_time >= NOW() - INTERVAL %s SECOND
+            """, (plate, cooldown_seconds))
+            row = cursor.fetchone()
+            cursor.close()
+            return bool(row and row[0] > 0)
+        except Exception:
+            return False  # fail open — let in-memory dedup handle it
 
     def _save_image(self, frame: np.ndarray, vehicle_type: str, plate: str, camera_id: int) -> str:
         """Save the captured vehicle frame to disk."""
@@ -383,8 +592,8 @@ class TollAIEngine:
         return str(path)
 
     def _process_frame(self, frame: np.ndarray, camera_id: int):
-        """Run YOLO detection + OCR on a single frame."""
-        results = self.model(frame, conf=YOLO_CONF_THRESHOLD, verbose=False)[0]
+        """Run YOLO tracking + OCR on a single frame."""
+        results = self.model.track(frame, conf=YOLO_CONF_THRESHOLD, persist=True, verbose=False)[0]
 
         for det in results.boxes:
             # Vehicle classification
@@ -397,64 +606,59 @@ class TollAIEngine:
             if vehicle_type == 'Unknown':
                 continue  # Skip non-vehicle detections
 
-            # Extract plate ROI & run OCR
-            plate_roi = extract_plate_region(frame, bbox)
+            # Check track ID OCR cache first to avoid repeating slow OCR on the same vehicle
+            track_id = int(det.id[0]) if det.id is not None else None
             plate_text = ''
             plate_conf = 0.0
 
-            if plate_roi is not None:
-                processed_roi = preprocess_plate_roi(plate_roi)
-                try:
-                    ocr_results = self.ocr.readtext(processed_roi, detail=1)
-                    if ocr_results:
-                        # Take highest-confidence result
-                        best = max(ocr_results, key=lambda r: r[2])
-                        raw = best[1]
-                        plate_conf = float(best[2]) * 100
-                        plate_text = clean_plate_text(raw)
-                except Exception as e:
-                    logger.warning(f"OCR error: {e}")
-
-            if not plate_text:
-                plate_text = f"UNKNOWN-{int(time.time()) % 9999}"
-
-            # Duplicate check
-            if self._is_duplicate(plate_text):
-                continue
-
-            # Save image
-            img_path = self._save_image(frame, vehicle_type, plate_text, camera_id)
-
-            # Toll calculation
-            toll = TOLL_RATES.get(vehicle_type, 0)
-            status = 'verified' if conf > 0.75 else 'manual_check'
-
-            # Database insert
-            record = {
-                'vehicle_type': vehicle_type,
-                'plate_number': plate_text,
-                'image_path':   img_path,
-                'camera_id':    camera_id,
-                'entry_time':   datetime.now(),
-                'confidence':   round(conf * 100, 2),
-                'toll_amount':  toll,
-                'plate_conf':   round(plate_conf, 2),
-                'status':       status,
-            }
-
-            if self.conn and self.conn.is_connected():
-                rec_id = insert_detection(self.conn, record)
-                logger.info(f"[#{rec_id}] {vehicle_type:10} | Plate: {plate_text:20} | "
-                            f"Conf: {conf:.1%} | Toll: {toll}Tk | {img_path}")
+            if track_id is not None and track_id in self.plate_cache:
+                plate_text, plate_conf = self.plate_cache[track_id]
             else:
-                logger.warning(f"DB offline — {vehicle_type} | {plate_text} | Toll: {toll}Tk")
+                # Extract plate ROI & run OCR once for new tracks
+                plate_roi = extract_plate_region(frame, bbox)
+                if plate_roi is not None:
+                    processed_roi = preprocess_plate_roi(plate_roi)
+                    try:
+                        ocr_results = self.ocr.readtext(processed_roi, detail=1) if self.ocr else []
+                        if ocr_results:
+                            best = max(ocr_results, key=lambda r: r[2])
+                            raw = best[1]
+                            plate_conf = float(best[2]) * 100
+                            plate_text = clean_plate_text(raw)
+                    except Exception as e:
+                        logger.warning(f"OCR error: {e}")
 
-            # Draw on frame
+                if not plate_text:
+                    if track_id is not None:
+                        plate_text = f"UNKNOWN-T{track_id}"
+                    else:
+                        h, w = frame.shape[:2]
+                        cx = int((bbox[0] + bbox[2]) / 2)
+                        cy = int((bbox[1] + bbox[3]) / 2)
+                        grid_x = int(cx / w * SPATIAL_GRID_CELLS)
+                        grid_y = int(cy / h * SPATIAL_GRID_CELLS)
+                        plate_text = f"UNKNOWN-Z{grid_x}{grid_y}"
+
+                if track_id is not None:
+                    self.plate_cache[track_id] = (plate_text, plate_conf)
+
+            # Draw on frame immediately for live visual feedback
+            toll = TOLL_RATES.get(vehicle_type, 0)
             draw_detection(frame, bbox, vehicle_type, plate_text, conf, toll)
 
-            # Update stats
-            self.total_today += 1
-            self.total_revenue += toll
+            # Deduplication check for DB insert
+            if self._is_duplicate(plate_text, bbox):
+                continue
+
+            status = 'verified' if conf > 0.75 else 'manual_check'
+
+            # Push to background worker queue (non-blocking for video streaming)
+            try:
+                self.db_queue.put_nowait((frame.copy(), vehicle_type, plate_text, camera_id, conf, toll, plate_conf, status))
+                self.total_today += 1
+                self.total_revenue += toll
+            except queue.Full:
+                pass
 
         return frame
 
@@ -466,34 +670,113 @@ class TollAIEngine:
             self.fps_counter = 0
             self.fps_start = time.time()
 
+    def _setup_http_isapi(self):
+        """Helper to establish HTTP ISAPI snapshot polling if RTSP is blocked."""
+        if not isinstance(self.source, str):
+            return None, None
+        
+        # 1. Direct HTTP URL
+        if self.source.startswith('http://') or self.source.startswith('https://'):
+            m = re.match(r'https?://(?:([^:]+):([^@]+)@)?([^/]+)(/.*)?', self.source)
+            if m:
+                u, p, host, path = m.groups()
+                session = requests.Session()
+                if u and p:
+                    session.auth = HTTPDigestAuth(urllib.parse.unquote(u), urllib.parse.unquote(p))
+                return session, f"http://{host}{path or '/ISAPI/Streaming/channels/101/picture'}"
+
+        # 2. RTSP URL fallback to HTTP ISAPI
+        m = re.match(r'rtsp://(?:([^:]+):([^@]+)@)?([^:/]+)(?::(\d+))?(/.*)?', self.source)
+        if m:
+            u, p, host, _, path = m.groups()
+            if u and p and host:
+                user = urllib.parse.unquote(u)
+                pwd = urllib.parse.unquote(p)
+                ch_match = re.search(r'Channels?/(\d+)', path or '')
+                ch = ch_match.group(1) if ch_match else '101'
+                session = requests.Session()
+                session.auth = HTTPDigestAuth(user, pwd)
+                test_url = f"http://{host}/ISAPI/Streaming/channels/{ch}/picture"
+                try:
+                    r = session.get(test_url, timeout=3)
+                    if r.status_code == 200:
+                        logger.info(f"✅ Auto-switched to Hikvision HTTP ISAPI stream: {test_url}")
+                        return session, test_url
+                except Exception as e:
+                    logger.debug(f"HTTP ISAPI probe failed: {e}")
+        return None, None
+
     def run(self):
         """Main processing loop."""
-        cap = cv2.VideoCapture(self.source)
+        os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;tcp|timeout;4000000'
+        cap = None
+        http_session = None
+        http_url = None
 
-        if not cap.isOpened():
-            logger.error(f"❌ Cannot open source: {self.source}")
-            return
+        # 1. Try OpenCV VideoCapture first (unless direct http://)
+        if not (isinstance(self.source, str) and self.source.startswith('http')):
+            cap = cv2.VideoCapture(self.source)
+            if not cap.isOpened():
+                logger.warning(f"⚠️ Cannot open primary source '{self.source}'. Probing HTTP ISAPI fallback...")
+                cap = None
+            else:
+                src_fps = cap.get(cv2.CAP_PROP_FPS) or 30
+                width   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                logger.info(f"📹 Source: {self.source} | {width}x{height} @ {src_fps:.1f} FPS")
 
-        # Get source properties
-        src_fps = cap.get(cv2.CAP_PROP_FPS) or 30
-        width   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        logger.info(f"📹 Source: {self.source} | {width}x{height} @ {src_fps:.1f} FPS")
+        # 2. If cap failed to open or source is HTTP, probe HTTP ISAPI stream
+        self.running = True
+        latest_http_frame = None
+        frame_lock = threading.Lock()
 
-        frame_skip = max(1, int(src_fps / 10))  # Process ~10 frames/sec
+        if cap is None and isinstance(self.source, str):
+            http_session, http_url = self._setup_http_isapi()
+            if http_url:
+                logger.info(f"📹 Live HTTP stream active: {http_url}")
+                # Start fast background frame grabber
+                def _http_grabber():
+                    nonlocal latest_http_frame
+                    while getattr(self, 'running', True):
+                        try:
+                            r = http_session.get(http_url, timeout=1.5)
+                            if r.status_code == 200:
+                                arr = np.frombuffer(r.content, np.uint8)
+                                img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                                if img is not None:
+                                    with frame_lock:
+                                        latest_http_frame = img
+                        except Exception:
+                            time.sleep(0.05)
+
+                t = threading.Thread(target=_http_grabber, daemon=True)
+                t.start()
+            else:
+                logger.warning("⚠️ Running AI Engine in Web Upload mode (listening for browser webcam frames)...")
+
+        frame_skip = 3 if cap is not None else 1
         frame_num  = 0
 
-        logger.info("🚀 AI Engine running. Press Q to quit.")
+        # Start dynamic camera sync thread to listen for UI updates
+        self.sync_thread = threading.Thread(target=self._sync_cameras_worker, daemon=True)
+        self.sync_thread.start()
+
+        logger.info(f"🚀 AI Engine running. Active cameras: {sorted(list(self.camera_ids))}")
 
         try:
-            while True:
-                # 1. Check for uploaded raw webcam frames first (supporting both cameras)
+            while self.running:
+                active_cams = sorted(list(self.camera_ids))
+                if not active_cams:
+                    time.sleep(0.2)
+                    continue
+
+                # 1. Check for uploaded raw webcam frames first for any active camera
                 webcam_processed = False
-                for cam_id in [1, 2]:
+                for cam_id in active_cams:
                     raw_frame = None
                     try:
                         req = urllib.request.Request(f"http://localhost:{self.port}/api/camera/{cam_id}/raw_download")
-                        with urllib.request.urlopen(req, timeout=0.1) as res:
+                        with urllib.request.urlopen(req, timeout=0.08) as res:
                             img_bytes = res.read()
                             if img_bytes:
                                 nparr = np.frombuffer(img_bytes, np.uint8)
@@ -503,8 +786,8 @@ class TollAIEngine:
 
                     if raw_frame is not None:
                         self.last_webcam_frame_time = time.time()
-                        # Process webcam frame for this camera
-                        processed = self._process_frame(raw_frame, cam_id)
+                        with self.model_lock:
+                            processed = self._process_frame(raw_frame, cam_id)
                         
                         # Post processed frame back to Flask
                         try:
@@ -522,72 +805,86 @@ class TollAIEngine:
                         webcam_processed = True
 
                 if webcam_processed:
-                    # If we processed webcam frame(s), sleep a bit to regulate rate and skip the video loop tick
-                    time.sleep(0.1)
+                    time.sleep(0.04)
                     continue
 
-                # If we recently processed browser webcam uploads, don't fall back to local video stream yet
                 if time.time() - self.last_webcam_frame_time < 2.0:
-                    time.sleep(0.1)
+                    time.sleep(0.04)
                     continue
 
-                # 2. Default: Process video stream frame
-                ret, frame = cap.read()
-                if not ret:
-                    if isinstance(self.source, str) and not str(self.source).isdigit():
-                        logger.info("Stream ended. Looping video source.")
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        ret, frame = cap.read()
-                        if not ret:
-                            break
-                    else:
-                        logger.info("Stream ended.")
-                        break
+                # 2. Process video frame from cap or HTTP snapshot
+                frame = None
+                if cap is not None and cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        if isinstance(self.source, str) and not str(self.source).isdigit() and os.path.exists(str(self.source)):
+                            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                            ret, frame = cap.read()
+                            if not ret:
+                                time.sleep(0.1)
+                                continue
+                        else:
+                            time.sleep(0.5)
+                            continue
+                elif http_session is not None:
+                    with frame_lock:
+                        if latest_http_frame is not None:
+                            frame = latest_http_frame
+                            latest_http_frame = None  # Consume frame
+                    if frame is None:
+                        time.sleep(0.02)
+                        continue
+                else:
+                    time.sleep(0.2)
+                    continue
+
+                if frame is None:
+                    time.sleep(0.02)
+                    continue
 
                 frame_num += 1
 
-                # Skip frames to maintain performance
-                if frame_num % frame_skip != 0:
-                    if self.show_window:
-                        cv2.imshow('AI Toll Monitor', frame)
+                # Skip frames to maintain performance if needed
+                if frame_skip > 1 and frame_num % frame_skip != 0:
                     continue
 
-                # Process
-                frame = self._process_frame(frame, CAMERA_ID)
-
-                # HUD
                 self._update_fps()
-                draw_hud(frame, self.current_fps, self.total_today, self.total_revenue)
 
-                # Post live annotated frame to Flask web server for streaming
-                try:
-                    _, jpeg = cv2.imencode('.jpg', frame)
-                    req = urllib.request.Request(
-                        f"http://localhost:{self.port}/api/camera/{CAMERA_ID}/frame",
-                        data=jpeg.tobytes(),
-                        headers={'Content-Type': 'image/jpeg'}
-                    )
-                    with urllib.request.urlopen(req, timeout=0.03) as res:
-                        res.read()
-                    if not getattr(self, 'stream_connected', False):
-                        self.stream_connected = True
-                        logger.info("📡 Live video streaming connected to Flask server successfully!")
-                except Exception as e:
-                    if getattr(self, 'stream_connected', False):
-                        self.stream_connected = False
-                        logger.warning(f"📡 Live video stream disconnected: {e}")
+                # Process detection for all selected active cameras
+                for current_cam in active_cams:
+                    with self.model_lock:
+                        proc_frame = self._process_frame(frame.copy(), current_cam)
 
-                # Display
-                if self.show_window:
-                    cv2.imshow(f'AI Toll Monitor — CAM {CAMERA_ID}', frame)
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord('q') or key == 27:
-                        break
+                    # HUD overlay
+                    draw_hud(proc_frame, self.current_fps, self.total_today, self.total_revenue)
+
+                    # Post live annotated frame to Flask web server for streaming
+                    try:
+                        _, jpeg = cv2.imencode('.jpg', proc_frame)
+                        req = urllib.request.Request(
+                            f"http://localhost:{self.port}/api/camera/{current_cam}/frame",
+                            data=jpeg.tobytes(),
+                            headers={'Content-Type': 'image/jpeg'}
+                        )
+                        with urllib.request.urlopen(req, timeout=0.03) as res:
+                            res.read()
+                    except Exception:
+                        pass
+
+                    # Display if window is enabled
+                    if self.show_window and current_cam == active_cams[0]:
+                        cv2.imshow(f'AI Toll Monitor — CAM {current_cam}', proc_frame)
+                        key = cv2.waitKey(1) & 0xFF
+                        if key == ord('q') or key == 27:
+                            self.running = False
+                            break
 
         except KeyboardInterrupt:
             logger.info("Stopped by user")
         finally:
-            cap.release()
+            self.running = False
+            if cap is not None:
+                cap.release()
             if self.show_window:
                 cv2.destroyAllWindows()
             if self.conn and self.conn.is_connected():
@@ -605,15 +902,42 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='AI Toll Monitoring Engine')
     parser.add_argument('--source',  type=str, default='0',
                         help='Video source: 0=webcam, /path/to/video.mp4, rtsp://...')
-    parser.add_argument('--model',   type=str, default='yolov8n.pt',
-                        help='YOLO model path (default: yolov8n.pt)')
-    parser.add_argument('--camera-id', type=int, default=1,
-                        help='Camera ID for database records (default: 1)')
+    parser.add_argument('--model',   type=str, default='yolov8s.pt',
+                        help='YOLO model path (default: yolov8s.pt — better accuracy than nano)')
+    parser.add_argument('--camera-id', type=int, default=None,
+                        help='Single Camera ID (default: None)')
+    parser.add_argument('--cameras', type=str, default=None,
+                        help='Comma-separated Camera IDs to process (e.g. "1,2,3" or "all")')
     parser.add_argument('--no-window', action='store_true',
                         help='Run headless (no display window)')
     args = parser.parse_args()
 
-    CAMERA_ID = args.camera_id
+    # Determine camera IDs to process
+    selected_cameras = []
+    if args.cameras:
+        if args.cameras.strip().lower() == 'all':
+            selected_cameras = list(range(1, len(NVR_CHANNELS) + 1))
+        else:
+            for part in args.cameras.split(','):
+                part = part.strip()
+                if part.isdigit() and 1 <= int(part) <= len(NVR_CHANNELS):
+                    selected_cameras.append(int(part))
+    elif args.camera_id is not None:
+        selected_cameras = [args.camera_id]
+    elif os.environ.get('ACTIVE_CAMERAS'):
+        env_c = os.environ.get('ACTIVE_CAMERAS')
+        if env_c.strip().lower() == 'all':
+            selected_cameras = list(range(1, len(NVR_CHANNELS) + 1))
+        else:
+            for part in env_c.split(','):
+                part = part.strip()
+                if part.isdigit() and 1 <= int(part) <= len(NVR_CHANNELS):
+                    selected_cameras.append(int(part))
+    else:
+        selected_cameras = [1, 2]
+
+    selected_cameras = sorted(list(set(selected_cameras))) if selected_cameras else [1]
+    logger.info(f"🎯 AI Engine initialized with Active Cameras: {selected_cameras}")
 
     # Try to parse source as int (webcam index)
     source = int(args.source) if args.source.isdigit() else args.source
@@ -621,6 +945,7 @@ if __name__ == '__main__':
     engine = TollAIEngine(
         source=source,
         model_path=args.model,
-        show_window=not args.no_window
+        show_window=not args.no_window,
+        camera_ids=selected_cameras
     )
     engine.run()
