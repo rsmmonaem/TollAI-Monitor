@@ -550,46 +550,47 @@ class TollAIEngine:
             finally:
                 self.db_queue.task_done()
 
-    def _spatial_key(self, bbox: list, frame_w: int = 640, frame_h: int = 360) -> str:
+    def _spatial_key(self, bbox: list, camera_id: int = 1, frame_w: int = 640, frame_h: int = 360) -> str:
         """Map a bounding box to a spatial grid cell key to identify stationary vehicles."""
         cx = (bbox[0] + bbox[2]) / 2  # center x
         cy = (bbox[1] + bbox[3]) / 2  # center y
         cell_x = int(cx / frame_w * SPATIAL_GRID_CELLS)
         cell_y = int(cy / frame_h * SPATIAL_GRID_CELLS)
-        return f"cell_{cell_x}_{cell_y}"
+        return f"cam{camera_id}_cell_{cell_x}_{cell_y}"
 
-    def _is_duplicate(self, plate: str, bbox: list) -> bool:
-        """Three-layer deduplication:
-        1. Known plate cooldown (including UNKNOWN-T tracked plates)
-        2. Spatial cell lock for UNKNOWN-Z plates (tracker fallback)
+    def _is_duplicate(self, plate: str, bbox: list, camera_id: int = 1) -> bool:
+        """Multi-layer deduplication:
+        1. Global Plate Cooldown: If the same license plate was detected on ANY camera
+           within PLATE_COOLDOWN seconds, it is rejected as a duplicate (no double toll).
+        2. Persistent DB Cooldown Check: Queries DB to prevent double charging across cameras/restarts.
+        3. Camera-specific Spatial Cell Lock: Prevents re-triggering for stationary cars in the same lane.
         """
         now = time.time()
+        cell_key = self._spatial_key(bbox, camera_id)
         
         # Only use spatial fallback if the plate is UNKNOWN-Z (meaning tracker failed)
         if plate.startswith('UNKNOWN-Z'):
-            cell_key = self._spatial_key(bbox)
             if cell_key in self.spatial_last_seen:
                 if now - self.spatial_last_seen[cell_key] < SPATIAL_COOLDOWN:
                     return True  # same zone, same standing vehicle
             self.spatial_last_seen[cell_key] = now
             return False
 
-        # For known plates, run the plate cooldown check
+        # For known plates, check global plate cooldown across all cameras
         if plate in self.plate_last_seen:
             if now - self.plate_last_seen[plate] < PLATE_COOLDOWN:
-                return True  # same plate within cooldown window
+                return True  # duplicate detection across cameras within cooldown window
 
-        # Also check spatial zone — catches same car re-read with slightly different OCR
-        cell_key = self._spatial_key(bbox)
+        # Also check camera-specific spatial zone
         if cell_key in self.spatial_last_seen:
             if now - self.spatial_last_seen[cell_key] < SPATIAL_COOLDOWN:
                 return True  # same zone occupied — treat as same vehicle
 
-        # Clear to insert — record timestamps
+        # Record timestamps
         self.plate_last_seen[plate] = now
         self.spatial_last_seen[cell_key] = now
 
-        # Layer 4: DB-backed check — survives restarts and multi-process deployments
+        # Layer 4: DB-backed check — catches same plate across any camera or restarted processes
         if self._db_dedup_check(plate, PLATE_COOLDOWN):
             return True
 
@@ -650,7 +651,7 @@ class TollAIEngine:
             self.ocr_pending.discard(cache_key)
 
             # Check deduplication and queue DB insert
-            if not self._is_duplicate(plate_text, bbox):
+            if not self._is_duplicate(plate_text, bbox, camera_id):
                 status = 'verified' if conf > 0.75 else 'manual_check'
                 try:
                     self.db_queue.put_nowait((full_frame, vehicle_type, plate_text, camera_id, conf, toll, plate_conf, status))
@@ -675,7 +676,7 @@ class TollAIEngine:
                 continue  # Skip non-vehicle detections
 
             track_id = int(det.id[0]) if det.id is not None else None
-            cache_key = track_id if track_id is not None else self._spatial_key(bbox)
+            cache_key = f"c{camera_id}_t{track_id}" if track_id is not None else self._spatial_key(bbox, camera_id)
 
             if cache_key in self.plate_cache:
                 plate_text, plate_conf = self.plate_cache[cache_key]
