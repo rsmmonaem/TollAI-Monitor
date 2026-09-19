@@ -41,6 +41,14 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from ultralytics import YOLO
+import torch
+
+# Global PyTorch inference optimizations
+try:
+    torch.set_num_threads(max(1, min(6, (os.cpu_count() or 4))))
+    torch.set_grad_enabled(False)
+except Exception:
+    pass
 
 # ─────────────────────────────────────────────────────────────
 # CONFIGURATION
@@ -348,25 +356,73 @@ def clean_plate_text(raw_text: str) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def classify_vehicle(yolo_class_name: str, yolo_class_id: int, bbox: list = None) -> str:
-    """Map YOLO class to toll system vehicle category, with Bangladeshi CNG/Three-Wheeler intelligence."""
+    """Map YOLO detection to the 9 Bangladeshi toll categories:
+    1. Bike (৳5)
+    2. CNG (৳10)
+    3. Auto (৳10)
+    4. Car (৳20)
+    5. Pickup (৳20)
+    6. Covered Van (৳40)
+    7. Bus (৳50)
+    8. Truck (৳50)
+    9. Lorry (৳60)
+    """
     name_lower = yolo_class_name.lower()
 
-    # 1. Intelligent Bangladeshi Three-Wheeler / CNG Detection:
-    # Standard COCO has no CNG/auto-rickshaw class. It classifies them as 'car' or 'motorcycle'.
-    # A front/rear facing CNG has a distinct tall & narrow cabin profile (width/height < 0.82 and height > 75).
-    if bbox is not None and (yolo_class_id in (2, 3) or 'car' in name_lower or 'motorcycle' in name_lower or 'bike' in name_lower):
-        w = max(1.0, bbox[2] - bbox[0])
-        h = max(1.0, bbox[3] - bbox[1])
-        ratio = w / h
-        if ratio < 0.82 and h > 75:
+    # Calculate bounding box geometric features
+    w = max(1.0, bbox[2] - bbox[0]) if bbox is not None else 100.0
+    h = max(1.0, bbox[3] - bbox[1]) if bbox is not None else 100.0
+    area = w * h
+    ratio = w / h
+
+    # 1. High-priority explicit custom model class labels (fine-tuned BD models)
+    for specific_key in ('cng', 'auto-rickshaw', 'easybike', 'auto', 'pickup', 'covered-van', 'covered van', 'lorry'):
+        if specific_key in name_lower:
+            return CUSTOM_CLASS_MAP.get(specific_key, specific_key.title())
+
+    # 2. Bike / Motorcycle (slender width < 70 or compact area < 8500):
+    if yolo_class_id == 3 or 'motorcycle' in name_lower or 'bike' in name_lower:
+        if w < 70 or area < 8500:
+            return 'Bike'
+
+    # 3. Three-Wheelers (CNG / Auto-Rickshaw / Easybike):
+    # Distinct cabin width >= 70, tall profile ratio < 0.82
+    if yolo_class_id in (2, 3) or 'car' in name_lower or 'motorcycle' in name_lower:
+        if ratio < 0.82 and h > 75 and w >= 65:
             return 'CNG'
+        # Battery-run easybike / auto-rickshaw (moderately boxy, medium height)
+        if 0.82 <= ratio <= 1.05 and 75 < h < 175 and area < 30000 and w >= 65:
+            return 'Auto'
 
-    # 2. Try custom map (case-insensitive)
-    for key, val in CUSTOM_CLASS_MAP.items():
-        if key in name_lower:
-            return val
+    # 4. Commercial Trucks, Pickups, Covered Vans, and Lorries:
+    if yolo_class_id == 7 or 'truck' in name_lower:
+        # Lorry: Multi-axle prime mover, long fuel/gas tanker, or large trailer
+        if area > 65000 or w > 280 or (ratio > 1.55 and area > 42000):
+            return 'Lorry'
+        # Pickup: Small utility truck / human hauler / mini pickup
+        elif area < 32000 or (h < 165 and w < 190):
+            return 'Pickup'
+        # Covered Van: Medium enclosed cargo box van
+        elif 32000 <= area <= 65000 and 0.80 <= ratio <= 1.35:
+            return 'Covered Van'
+        else:
+            return 'Truck'
 
-    # 3. Fall back to COCO class IDs
+    # 5. Bus:
+    if yolo_class_id == 5 or 'bus' in name_lower:
+        return 'Bus'
+
+    # 6. Bike / Motorcycle fallback:
+    if yolo_class_id == 3 or 'motorcycle' in name_lower:
+        return 'Bike'
+
+    # 7. Car / Microbus / SUV / Covered Van:
+    if yolo_class_id == 2 or 'car' in name_lower:
+        # Check if it's a delivery van detected as car
+        if area > 45000 and h > 185 and ratio < 1.25:
+            return 'Covered Van'
+        return 'Car'
+
     return VEHICLE_CLASS_IDS.get(yolo_class_id, 'Unknown')
 
 
@@ -459,6 +515,18 @@ class TollAIEngine:
         # Load YOLO model
         logger.info(f"Loading YOLO model: {model_path}")
         self.model = YOLO(model_path)
+
+        # Warmup YOLO model for zero cold-start inference latency
+        try:
+            dummy = np.zeros((360, 640, 3), dtype=np.uint8)
+            with torch.inference_mode():
+                self.model(dummy, verbose=False, imgsz=480)
+            logger.info("⚡ YOLO model warmed up with torch.inference_mode")
+        except Exception as e:
+            logger.debug(f"Warmup notice: {e}")
+
+        # Thread pool for concurrent multi-camera NVR processing
+        self.nvr_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="NVRProcessWorker")
 
         # EasyOCR reader (Bengali + English)
         if EASYOCR_AVAILABLE:
@@ -693,7 +761,15 @@ class TollAIEngine:
 
     def _process_frame(self, frame: np.ndarray, camera_id: int):
         """Run YOLO tracking + ultra-fast non-blocking OCR pipeline on a single frame."""
-        results = self.model.track(frame, conf=YOLO_CONF_THRESHOLD, persist=True, verbose=False, imgsz=480)[0]
+        with torch.inference_mode():
+            results = self.model.track(
+                frame,
+                conf=YOLO_CONF_THRESHOLD,
+                persist=True,
+                verbose=False,
+                imgsz=480,
+                tracker="bytetrack.yaml"
+            )[0]
 
         # 1. Extract all valid vehicle detections
         raw_dets = []
@@ -925,12 +1001,12 @@ class TollAIEngine:
                     time.sleep(0.02)
                     continue
 
-                # 2. Process real NVR camera frames if source is 'nvr'
+                # 2. Process real NVR camera frames concurrently if source is 'nvr'
                 if isinstance(self.source, str) and self.source.lower() == 'nvr':
-                    for cam_id in active_cams:
+                    def _handle_nvr_cam(cam_id):
                         raw_frame = None
                         try:
-                            res = self.http_session.get(f"http://localhost:{self.port}/api/camera/{cam_id}/raw_nvr_frame", timeout=0.4)
+                            res = self.http_session.get(f"http://localhost:{self.port}/api/camera/{cam_id}/raw_nvr_frame", timeout=0.35)
                             if res.status_code == 200 and res.content and len(res.content) > 1000:
                                 arr = np.frombuffer(res.content, np.uint8)
                                 raw_frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -940,7 +1016,6 @@ class TollAIEngine:
                         if raw_frame is not None:
                             if raw_frame.shape[1] > 960:
                                 raw_frame = cv2.resize(raw_frame, (640, 360))
-                            self._update_fps()
                             with self.model_lock:
                                 proc_frame = self._process_frame(raw_frame, cam_id)
                             draw_hud(proc_frame, self.current_fps, self.total_today, self.total_revenue)
@@ -954,7 +1029,10 @@ class TollAIEngine:
                                 )
                             except Exception:
                                 pass
-                    time.sleep(0.04)
+
+                    self._update_fps()
+                    list(self.nvr_executor.map(_handle_nvr_cam, active_cams))
+                    time.sleep(0.02)
                     continue
 
                 # 3. Process video frame from cap or HTTP snapshot

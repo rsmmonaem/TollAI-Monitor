@@ -21,6 +21,7 @@ from PIL import Image
 import requests
 from requests.auth import HTTPDigestAuth
 from requests.adapters import HTTPAdapter
+from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify, request, send_from_directory, Response
 from flask_cors import CORS
 
@@ -226,26 +227,32 @@ def get_camera_placeholder(cam_id):
     except Exception:
         return get_placeholder_bytes()
 
+def _poll_single_cam(item):
+    cam_id, ch_info = item
+    ch = ch_info['channel']
+    url = f"http://{NVR_HOST}/ISAPI/Streaming/channels/{ch}/picture"
+    try:
+        resp = nvr_session.get(url, timeout=2.0)
+        if resp.status_code == 200 and resp.content and len(resp.content) > 1000:
+            nvr_frame_cache[cam_id] = resp.content
+            nvr_frame_cache_times[cam_id] = time.time()
+        elif resp.status_code == 503:
+            if cam_id not in nvr_frame_cache:
+                nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
+    except Exception:
+        if cam_id not in nvr_frame_cache:
+            nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
+
 def _background_nvr_poller():
-    """Continuously poll NVR cameras in background and update cache with zero streaming lag."""
-    logger.info("📡 Starting background NVR multi-camera poller...")
+    """Continuously poll NVR cameras concurrently in background with zero streaming lag."""
+    logger.info("📡 Starting concurrent background NVR multi-camera poller...")
+    pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="NVRPoller")
     while True:
-        for cam_id, ch_info in list(NVR_CHANNELS.items()):
-            ch = ch_info['channel']
-            url = f"http://{NVR_HOST}/ISAPI/Streaming/channels/{ch}/picture"
-            try:
-                resp = nvr_session.get(url, timeout=2.5)
-                if resp.status_code == 200 and resp.content and len(resp.content) > 1000:
-                    nvr_frame_cache[cam_id] = resp.content
-                    nvr_frame_cache_times[cam_id] = time.time()
-                elif resp.status_code == 503:
-                    if cam_id not in nvr_frame_cache:
-                        nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
-            except Exception:
-                if cam_id not in nvr_frame_cache:
-                    nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
-            time.sleep(0.05)
-        time.sleep(0.8)
+        try:
+            list(pool.map(_poll_single_cam, list(NVR_CHANNELS.items())))
+        except Exception as e:
+            logger.debug(f"NVR poller batch notice: {e}")
+        time.sleep(0.35)
 
 # Start background poller thread
 nvr_poller_thread = threading.Thread(target=_background_nvr_poller, daemon=True)
