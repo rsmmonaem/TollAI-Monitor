@@ -264,6 +264,11 @@ const App = (() => {
     if (containerQuad) containerQuad.style.display = (mode === 'quad' ? 'flex' : 'none');
     if (containerAll14) containerAll14.style.display = (mode === 'all14' ? 'block' : 'none');
 
+    if (mode !== 'all14' && all14Interval) {
+      clearInterval(all14Interval);
+      all14Interval = null;
+    }
+
     if (mode === 'quad') {
       [1, 2, 3, 4].forEach(i => {
         const camId = activeCameras[`quad${i}`];
@@ -286,6 +291,8 @@ const App = (() => {
       window.scrollTo({ top: feedSec.offsetTop - 20, behavior: 'smooth' });
     }
   }
+
+  let all14Interval = null;
 
   function renderAll14Grid() {
     const container = document.getElementById('all14-grid-container');
@@ -312,7 +319,7 @@ const App = (() => {
             </div>
           </div>
           <div class="camera-feed" style="aspect-ratio:16/9; cursor:pointer;" onclick="App.focusCamera(${c.id})" title="Click to focus in Slot 1">
-            <img src="/api/camera/${c.id}/stream" alt="${c.name}" loading="lazy" />
+            <img id="all14-img-${c.id}" src="/api/camera/${c.id}/snapshot?t=${Date.now()}" alt="${c.name}" />
           </div>
           <div class="card-footer-mini">
             <span class="text-muted-c" style="font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;">${c.lane}</span>
@@ -323,6 +330,23 @@ const App = (() => {
         </div>
       `;
     }).join('');
+
+    // Refresh all 14 snapshots on a quick interval without exhausting browser HTTP connection limit
+    if (all14Interval) clearInterval(all14Interval);
+    all14Interval = setInterval(() => {
+      if (currentCameraView !== 'all14') {
+        clearInterval(all14Interval);
+        all14Interval = null;
+        return;
+      }
+      const t = Date.now();
+      cams.forEach(c => {
+        const img = document.getElementById(`all14-img-${c.id}`);
+        if (img) {
+          img.src = `/api/camera/${c.id}/snapshot?t=${t}`;
+        }
+      });
+    }, 1500);
   }
 
   function startCameraSimulation() {
