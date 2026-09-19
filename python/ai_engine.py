@@ -208,13 +208,15 @@ def init_database(conn):
     # Default rates
     cursor.execute("""
         INSERT IGNORE INTO toll_rates (vehicle_type, rate_amount, effective_from, updated_by) VALUES
-            ('Bike',   5.00,  '2025-01-01', 'BRTA'),
-            ('CNG',    10.00, '2025-01-01', 'BRTA'),
-            ('Auto',   10.00, '2025-01-01', 'BRTA'),
-            ('Pickup', 20.00, '2025-01-01', 'BRTA'),
-            ('Bus',    50.00, '2025-01-01', 'BRTA'),
-            ('Truck',  50.00, '2025-01-01', 'BRTA'),
-            ('Lorry',  60.00, '2025-01-01', 'BRTA');
+            ('Bike',        5.00,  '2025-01-01', 'BRTA'),
+            ('CNG',         10.00, '2025-01-01', 'BRTA'),
+            ('Auto',        10.00, '2025-01-01', 'BRTA'),
+            ('Pickup',      20.00, '2025-01-01', 'BRTA'),
+            ('Car',         20.00, '2025-01-01', 'BRTA'),
+            ('Covered Van', 40.00, '2025-01-01', 'BRTA'),
+            ('Bus',         50.00, '2025-01-01', 'BRTA'),
+            ('Truck',       50.00, '2025-01-01', 'BRTA'),
+            ('Lorry',       60.00, '2025-01-01', 'BRTA');
     """)
 
     # Rate audit log table
@@ -378,10 +380,11 @@ COLORS = {
     'Auto':   (0, 190, 230),
     'Pickup': (0, 215, 255),
     'Bus':    (255, 165, 0),
-    'Truck':  (71, 68, 239),
-    'Lorry':  (200, 100, 255),
-    'Car':    (128, 192, 255),
-    'Unknown':(150, 150, 150),
+    'Truck':       (71, 68, 239),
+    'Lorry':       (200, 100, 255),
+    'Covered Van': (255, 190, 0),
+    'Car':         (128, 192, 255),
+    'Unknown':     (150, 150, 150),
 }
 
 def draw_detection(frame, bbox, vehicle_type: str, plate: str, confidence: float, toll: int):
