@@ -83,14 +83,14 @@ NVR_CHANNELS = {
 # Default Active Camera ID (backward compatibility)
 CAMERA_ID = 1
 
-# Confidence threshold for YOLO detections
-YOLO_CONF_THRESHOLD = 0.45
+# Confidence threshold for YOLO detections (0.16 handles extreme night glare from headlights)
+YOLO_CONF_THRESHOLD = float(os.environ.get('YOLO_CONF_THRESHOLD', 0.16))
 
-# Detection cooldown per plate (seconds) — prevents duplicate entries for known plates
-PLATE_COOLDOWN = 30
+# Detection cooldown per plate (seconds) — prevents duplicate entries across cameras
+PLATE_COOLDOWN = int(os.environ.get('PLATE_COOLDOWN', 60))
 
-# Spatial cooldown window (seconds) — prevents duplicates for same vehicle standing still
-SPATIAL_COOLDOWN = 30
+# Stationary cooldown window (seconds) — prevents duplicates for parked/standing vehicles
+STATIONARY_COOLDOWN = int(os.environ.get('STATIONARY_COOLDOWN', 120))
 
 # Grid cell size for spatial deduplication (fraction of frame width/height)
 SPATIAL_GRID_CELLS = 8  # divide frame into 8x8 zones
@@ -345,15 +345,26 @@ def clean_plate_text(raw_text: str) -> str:
 # VEHICLE CLASSIFICATION
 # ─────────────────────────────────────────────────────────────
 
-def classify_vehicle(yolo_class_name: str, yolo_class_id: int) -> str:
-    """Map YOLO class to toll system vehicle category."""
-    # Try custom map first (case-insensitive)
+def classify_vehicle(yolo_class_name: str, yolo_class_id: int, bbox: list = None) -> str:
+    """Map YOLO class to toll system vehicle category, with Bangladeshi CNG/Three-Wheeler intelligence."""
     name_lower = yolo_class_name.lower()
+
+    # 1. Intelligent Bangladeshi Three-Wheeler / CNG Detection:
+    # Standard COCO has no CNG/auto-rickshaw class. It classifies them as 'car' or 'motorcycle'.
+    # A front/rear facing CNG has a distinct tall & narrow cabin profile (width/height < 0.82 and height > 75).
+    if bbox is not None and (yolo_class_id in (2, 3) or 'car' in name_lower or 'motorcycle' in name_lower or 'bike' in name_lower):
+        w = max(1.0, bbox[2] - bbox[0])
+        h = max(1.0, bbox[3] - bbox[1])
+        ratio = w / h
+        if ratio < 0.82 and h > 75:
+            return 'CNG'
+
+    # 2. Try custom map (case-insensitive)
     for key, val in CUSTOM_CLASS_MAP.items():
         if key in name_lower:
             return val
 
-    # Fall back to COCO class IDs
+    # 3. Fall back to COCO class IDs
     return VEHICLE_CLASS_IDS.get(yolo_class_id, 'Unknown')
 
 
@@ -681,18 +692,50 @@ class TollAIEngine:
         """Run YOLO tracking + ultra-fast non-blocking OCR pipeline on a single frame."""
         results = self.model.track(frame, conf=YOLO_CONF_THRESHOLD, persist=True, verbose=False, imgsz=480)[0]
 
+        # 1. Extract all valid vehicle detections
+        raw_dets = []
         for det in results.boxes:
-            # Vehicle classification
             cls_id   = int(det.cls[0])
             cls_name = self.model.names[cls_id]
             conf     = float(det.conf[0])
             bbox     = det.xyxy[0].tolist()
 
-            vehicle_type = classify_vehicle(cls_name, cls_id)
+            vehicle_type = classify_vehicle(cls_name, cls_id, bbox)
             if vehicle_type == 'Unknown':
                 continue  # Skip non-vehicle detections
 
             track_id = int(det.id[0]) if det.id is not None else None
+            raw_dets.append({
+                'cls_id': cls_id, 'cls_name': cls_name, 'conf': conf,
+                'bbox': bbox, 'vehicle_type': vehicle_type, 'track_id': track_id
+            })
+
+        # 2. Suppress duplicate overlapping boxes (e.g. car + motorcycle overlapping on same CNG)
+        kept_dets = []
+        for d in sorted(raw_dets, key=lambda x: x['conf'], reverse=True):
+            overlap = False
+            for k in kept_dets:
+                b1, b2 = d['bbox'], k['bbox']
+                xA = max(b1[0], b2[0])
+                yA = max(b1[1], b2[1])
+                xB = min(b1[2], b2[2])
+                yB = min(b1[3], b2[3])
+                inter = max(0.0, xB - xA) * max(0.0, yB - yA)
+                a1 = max(1.0, (b1[2] - b1[0]) * (b1[3] - b1[1]))
+                a2 = max(1.0, (b2[2] - b2[0]) * (b2[3] - b2[1]))
+                iou = inter / float(a1 + a2 - inter)
+                if iou > 0.40:
+                    overlap = True
+                    break
+            if not overlap:
+                kept_dets.append(d)
+
+        for det in kept_dets:
+            bbox = det['bbox']
+            vehicle_type = det['vehicle_type']
+            conf = det['conf']
+            track_id = det['track_id']
+
             cache_key = f"c{camera_id}_t{track_id}" if track_id is not None else self._spatial_key(bbox, camera_id)
 
             if cache_key in self.plate_cache:
