@@ -4,7 +4,9 @@ echo "=== Starting TollAI Monitor ==="
 
 # Determine python executable (prefer venv if present)
 PYTHON_BIN="python"
-if [ -d "python/venv" ]; then
+if [ -d "venv" ]; then
+    PYTHON_BIN="./venv/bin/python"
+elif [ -d "python/venv" ]; then
     PYTHON_BIN="./python/venv/bin/python"
 fi
 
@@ -44,19 +46,31 @@ if conn:
 
 # 3. Start the AI Engine — Camera source priority:
 #    1st: CAM1_SOURCE environment variable (if provided)
-#    2nd: Local traffic.mp4 or python/traffic.mp4 demo file
-#    3rd: RTSP stream (if reachable)
+#    2nd: Real NVR multi-camera streams (if 103.79.179.116 is reachable)
+#    3rd: Local traffic.mp4 demo file (fallback)
 #    4th: Webcam (/dev/video0 if present)
-RTSP_URL='rtsp://admin:nurbio2026@103.79.179.116:554/Streaming/Channels/101'
+NVR_ONLINE=0
+if $PYTHON_BIN -c "
+import requests, sys
+from requests.auth import HTTPDigestAuth
+try:
+    r = requests.get('http://103.79.179.116/ISAPI/Streaming/channels/101/picture', auth=HTTPDigestAuth('admin', 'nurbio2026'), timeout=2.5)
+    sys.exit(0 if r.status_code == 200 else 1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+    NVR_ONLINE=1
+fi
 
 if [ -n "$CAM1_SOURCE" ]; then
     SOURCE="$CAM1_SOURCE"
+elif [ "$NVR_ONLINE" -eq 1 ]; then
+    echo "✅ Real NVR at 103.79.179.116 is ONLINE. Using real multi-camera NVR streams!"
+    SOURCE="nvr"
 elif [ -f "traffic.mp4" ]; then
     SOURCE="traffic.mp4"
 elif [ -f "python/traffic.mp4" ]; then
     SOURCE="python/traffic.mp4"
-elif command -v nc >/dev/null 2>&1 && nc -z -w 1 103.79.179.116 554 2>/dev/null; then
-    SOURCE="$RTSP_URL"
 elif [ -e "/dev/video0" ]; then
     SOURCE="0"
 else

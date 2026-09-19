@@ -760,8 +760,8 @@ class TollAIEngine:
         http_session = None
         http_url = None
 
-        # 1. Try OpenCV VideoCapture first (unless direct http://)
-        if not (isinstance(self.source, str) and self.source.startswith('http')):
+        # 1. Try OpenCV VideoCapture first (unless direct http:// or nvr mode)
+        if not (isinstance(self.source, str) and (self.source.startswith('http') or self.source.lower() == 'nvr')):
             cap = cv2.VideoCapture(self.source)
             if not cap.isOpened():
                 logger.warning(f"⚠️ Cannot open primary source '{self.source}'. Probing HTTP ISAPI fallback...")
@@ -775,6 +775,8 @@ class TollAIEngine:
                 width   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 height  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 logger.info(f"📹 Source: {self.source} | {width}x{height} @ {src_fps:.1f} FPS")
+        elif isinstance(self.source, str) and self.source.lower() == 'nvr':
+            logger.info("📹 Source: Real NVR Multi-Channel Stream Mode active (14-channel live capture)")
 
         # 2. If cap failed to open or source is HTTP, probe HTTP ISAPI stream
         self.running = True
@@ -859,7 +861,39 @@ class TollAIEngine:
                     time.sleep(0.02)
                     continue
 
-                # 2. Process video frame from cap or HTTP snapshot
+                # 2. Process real NVR camera frames if source is 'nvr'
+                if isinstance(self.source, str) and self.source.lower() == 'nvr':
+                    for cam_id in active_cams:
+                        raw_frame = None
+                        try:
+                            res = self.http_session.get(f"http://localhost:{self.port}/api/camera/{cam_id}/raw_nvr_frame", timeout=0.4)
+                            if res.status_code == 200 and res.content and len(res.content) > 1000:
+                                arr = np.frombuffer(res.content, np.uint8)
+                                raw_frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                        except Exception:
+                            pass
+
+                        if raw_frame is not None:
+                            if raw_frame.shape[1] > 960:
+                                raw_frame = cv2.resize(raw_frame, (640, 360))
+                            self._update_fps()
+                            with self.model_lock:
+                                proc_frame = self._process_frame(raw_frame, cam_id)
+                            draw_hud(proc_frame, self.current_fps, self.total_today, self.total_revenue)
+                            _, jpeg = cv2.imencode('.jpg', proc_frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
+                            try:
+                                self.http_session.post(
+                                    f"http://localhost:{self.port}/api/camera/{cam_id}/frame",
+                                    data=jpeg.tobytes(),
+                                    headers={'Content-Type': 'image/jpeg'},
+                                    timeout=0.25
+                                )
+                            except Exception:
+                                pass
+                    time.sleep(0.04)
+                    continue
+
+                # 3. Process video frame from cap or HTTP snapshot
                 frame = None
                 if cap is not None and cap.isOpened():
                     ret, frame = cap.read()

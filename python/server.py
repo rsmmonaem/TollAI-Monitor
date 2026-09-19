@@ -231,11 +231,6 @@ def _background_nvr_poller():
     logger.info("📡 Starting background NVR multi-camera poller...")
     while True:
         for cam_id, ch_info in list(NVR_CHANNELS.items()):
-            now = time.time()
-            # If camera is currently active with AI engine frames, skip polling NVR
-            if cam_id in latest_frames and (now - latest_frame_times.get(cam_id, 0) < 5.0):
-                continue
-            
             ch = ch_info['channel']
             url = f"http://{NVR_HOST}/ISAPI/Streaming/channels/{ch}/picture"
             try:
@@ -249,8 +244,8 @@ def _background_nvr_poller():
             except Exception:
                 if cam_id not in nvr_frame_cache:
                     nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
-            time.sleep(0.08)
-        time.sleep(1.2)
+            time.sleep(0.05)
+        time.sleep(0.8)
 
 # Start background poller thread
 nvr_poller_thread = threading.Thread(target=_background_nvr_poller, daemon=True)
@@ -364,6 +359,13 @@ def get_camera_snapshot(camera_id):
         return Response(snap, mimetype='image/jpeg', headers={'Cache-Control': 'no-cache, no-store, must-revalidate'})
     placeholder_bytes = get_placeholder_bytes()
     return Response(placeholder_bytes, mimetype='image/jpeg', headers={'Cache-Control': 'no-cache'})
+
+@app.route('/api/camera/<int:camera_id>/raw_nvr_frame')
+def get_raw_nvr_frame(camera_id):
+    """Return the raw unannotated frame from NVR for AI detection."""
+    if camera_id in nvr_frame_cache and nvr_frame_cache[camera_id]:
+        return Response(nvr_frame_cache[camera_id], mimetype='image/jpeg', headers={'Cache-Control': 'no-cache'})
+    return ('', 404)
 
 @app.route('/api/camera/channels')
 def get_camera_channels():
