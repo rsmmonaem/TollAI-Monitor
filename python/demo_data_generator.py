@@ -275,7 +275,7 @@ def print_summary(records: list[dict]):
 # ENTRY POINT
 # ─────────────────────────────────────────────────────────────
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description='AI Toll Demo Data Generator')
     parser.add_argument('--count', type=int, default=None,
                         help='Override total count (distributes proportionally)')
@@ -285,7 +285,7 @@ def main():
                         help='Generate records without inserting to DB')
     parser.add_argument('--truncate', action='store_true',
                         help='Truncate existing table before inserting')
-    args = parser.parse_args()
+    args = parser.parse_args(argv if argv is not None else None)
 
     # Adjust distribution if custom count requested
     distribution = VEHICLE_DISTRIBUTION.copy()
