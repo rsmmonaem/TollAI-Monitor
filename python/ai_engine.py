@@ -11,7 +11,7 @@ Usage:
     python ai_engine.py --source /path/to/video.mp4 # video file
     python ai_engine.py --source rtsp://camera-ip   # RTSP stream
 """
-
+import math
 import cv2
 try:
     import easyocr
@@ -469,6 +469,7 @@ class TollAIEngine:
         self.plate_last_bbox: dict[str, list] = {}    # plate_text -> last bbox [x1,y1,x2,y2]
         self.spatial_last_seen: dict[str, float] = {} # spatial_cell_key -> last insert timestamp
         self.plate_cache: dict[int, tuple[str, float]] = {}  # track_id -> (plate_text, conf)
+        self.recent_records: list[dict] = []  # list of {'camera_id': int, 'bbox': list, 'plate': str, 'time': float}
         self.total_today = 0
         self.total_revenue = 0
         self.fps_counter = 0
@@ -560,40 +561,56 @@ class TollAIEngine:
 
     def _is_duplicate(self, plate: str, bbox: list, camera_id: int = 1) -> bool:
         """Multi-layer deduplication:
-        1. Global Plate Cooldown: If the same license plate was detected on ANY camera
-           within PLATE_COOLDOWN seconds, it is rejected as a duplicate (no double toll).
-        2. Persistent DB Cooldown Check: Queries DB to prevent double charging across cameras/restarts.
-        3. Camera-specific Spatial Cell Lock: Prevents re-triggering for stationary cars in the same lane.
+        1. Parked / Stationary Vehicle Filter (IoU > 0.35 or Center Dist < 65px):
+           If any vehicle in this camera is in the same physical spot, it is a standing vehicle.
+           Refreshes timer and returns True (DUPLICATE) so parked cars are NEVER inserted repeatedly.
+        2. Global Plate Cooldown: If the same license plate was detected on ANY camera
+           within PLATE_COOLDOWN (60s), reject duplicate.
+        3. Persistent DB Cooldown: Catches restarts.
         """
         now = time.time()
-        cell_key = self._spatial_key(bbox, camera_id)
-        
-        # Only use spatial fallback if the plate is UNKNOWN-Z (meaning tracker failed)
-        if plate.startswith('UNKNOWN-Z'):
-            if cell_key in self.spatial_last_seen:
-                if now - self.spatial_last_seen[cell_key] < SPATIAL_COOLDOWN:
-                    return True  # same zone, same standing vehicle
-            self.spatial_last_seen[cell_key] = now
-            return False
 
-        # For known plates, check global plate cooldown across all cameras
-        if plate in self.plate_last_seen:
-            if now - self.plate_last_seen[plate] < PLATE_COOLDOWN:
-                return True  # duplicate detection across cameras within cooldown window
+        # Clean up records older than 300 seconds
+        self.recent_records = [r for r in self.recent_records if now - r['time'] < 300]
 
-        # Also check camera-specific spatial zone
-        if cell_key in self.spatial_last_seen:
-            if now - self.spatial_last_seen[cell_key] < SPATIAL_COOLDOWN:
-                return True  # same zone occupied — treat as same vehicle
+        # 1. Stationary Vehicle Check in the same camera view
+        for rec in self.recent_records:
+            if rec['camera_id'] == camera_id:
+                b1, b2 = rec['bbox'], bbox
+                xA = max(b1[0], b2[0])
+                yA = max(b1[1], b2[1])
+                xB = min(b1[2], b2[2])
+                yB = min(b1[3], b2[3])
+                inter = max(0.0, xB - xA) * max(0.0, yB - yA)
+                area1 = max(1.0, (b1[2] - b1[0]) * (b1[3] - b1[1]))
+                area2 = max(1.0, (b2[2] - b2[0]) * (b2[3] - b2[1]))
+                iou = inter / float(area1 + area2 - inter)
 
-        # Record timestamps
-        self.plate_last_seen[plate] = now
-        self.spatial_last_seen[cell_key] = now
+                c1x, c1y = (b1[0] + b1[2]) / 2.0, (b1[1] + b1[3]) / 2.0
+                c2x, c2y = (b2[0] + b2[2]) / 2.0, (b2[1] + b2[3]) / 2.0
+                dist = math.hypot(c1x - c2x, c1y - c2y)
 
-        # Layer 4: DB-backed check — catches same plate across any camera or restarted processes
-        if self._db_dedup_check(plate, PLATE_COOLDOWN):
-            return True
+                if iou > 0.35 or dist < 65:
+                    # Vehicle is still parked or queued at the same spot!
+                    rec['time'] = now
+                    rec['bbox'] = bbox
+                    return True
 
+        # 2. Known plate cooldown across all cameras
+        if plate and not plate.startswith('UNKNOWN'):
+            for rec in self.recent_records:
+                if rec['plate'] == plate and (now - rec['time'] < PLATE_COOLDOWN):
+                    return True
+            if self._db_dedup_check(plate, PLATE_COOLDOWN):
+                return True
+
+        # 3. New unique vehicle detection! Record it
+        self.recent_records.append({
+            'camera_id': camera_id,
+            'bbox': bbox,
+            'plate': plate,
+            'time': now
+        })
         return False
 
     def _db_dedup_check(self, plate: str, cooldown_seconds: int) -> bool:
