@@ -391,6 +391,91 @@ def get_camera_channels():
     return jsonify(cams)
 
 # ─────────────────────────────────────────────────────────────
+# USER AUTHENTICATION & LOGIN API
+# ─────────────────────────────────────────────────────────────
+import secrets
+
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@gmail.com').strip().lower()
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '12345678').strip()
+
+# Active in-memory session tokens: token -> { email, name, role, login_time }
+active_auth_tokens = {}
+
+def create_auth_token(email):
+    token = secrets.token_hex(24)
+    active_auth_tokens[token] = {
+        'email': email,
+        'name': 'Admin Officer',
+        'role': 'Super Admin',
+        'login_time': time.time()
+    }
+    return token
+
+def verify_auth_token(token):
+    if not token:
+        return None
+    session_info = active_auth_tokens.get(token)
+    if session_info:
+        # Valid for 30 days
+        if time.time() - session_info.get('login_time', 0) < 30 * 86400:
+            return session_info
+        else:
+            active_auth_tokens.pop(token, None)
+    return None
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_login():
+    """Authenticate user with email and password."""
+    data = request.get_json() or {}
+    email = str(data.get('email', '')).strip().lower()
+    password = str(data.get('password', '')).strip()
+
+    # Allow login with admin@gmail.com or username 'admin'
+    valid_emails = {ADMIN_EMAIL, 'admin'}
+    if email in valid_emails and password == ADMIN_PASSWORD:
+        token = create_auth_token(ADMIN_EMAIL)
+        return jsonify({
+            'success': True,
+            'token': token,
+            'user': {
+                'email': ADMIN_EMAIL,
+                'name': 'Admin Officer',
+                'role': 'Super Admin'
+            }
+        })
+    return jsonify({
+        'success': False,
+        'error': 'Invalid email or password. Please use admin@gmail.com and 12345678'
+    }), 401
+
+@app.route('/api/auth/me', methods=['GET'])
+def api_auth_me():
+    """Check session token validity."""
+    auth_header = request.headers.get('Authorization', '')
+    token = None
+    if auth_header.startswith('Bearer '):
+        token = auth_header.split(' ', 1)[1].strip()
+    elif 'token' in request.args:
+        token = request.args.get('token')
+
+    session = verify_auth_token(token)
+    if session:
+        return jsonify({
+            'authenticated': True,
+            'user': session
+        })
+    return jsonify({'authenticated': False}), 401
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_logout():
+    """Sign out user and invalidate session."""
+    auth_header = request.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        token = auth_header.split(' ', 1)[1].strip()
+        active_auth_tokens.pop(token, None)
+    return jsonify({'success': True})
+
+# ─────────────────────────────────────────────────────────────
 # AI ENGINE CAMERA MULTI-SELECT ENDPOINT
 # ─────────────────────────────────────────────────────────────
 

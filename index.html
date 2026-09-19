@@ -95,12 +95,15 @@
     </ul>
 
     <!-- Sidebar Footer -->
-    <div class="sidebar-footer">
-      <div class="user-avatar">A</div>
-      <div class="user-info">
-        <h6>Admin Officer</h6>
-        <small>Highway Authority</small>
+    <div class="sidebar-footer" style="display:flex; align-items:center; gap:10px;">
+      <div class="user-avatar" id="sidebar-avatar">A</div>
+      <div class="user-info" style="flex:1; min-width:0;">
+        <h6 id="sidebar-user-name" style="margin:0; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Admin Officer</h6>
+        <small id="sidebar-user-email" style="color:var(--text-secondary); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block;">admin@gmail.com</small>
       </div>
+      <button class="btn btn-sm btn-outline-danger" id="logout-btn" title="Sign Out" style="padding: 4px 8px; border-radius: 6px; font-size: 13px; line-height:1;">
+        <i class="bi bi-box-arrow-right"></i>
+      </button>
     </div>
   </nav>
 
@@ -132,6 +135,13 @@
         </div>
         <div class="btn-icon" title="Settings">
           <i class="bi bi-gear"></i>
+        </div>
+        <div class="d-flex align-items-center gap-2 ms-2 ps-2 border-start border-secondary">
+          <span class="d-none d-md-inline" style="font-size:12px; color:var(--text-secondary); font-weight:500;" id="topbar-user-email">admin@gmail.com</span>
+          <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1" id="topbar-logout-btn" title="Sign Out" style="padding: 4px 10px; font-size: 12px; border-radius: 6px;">
+            <i class="bi bi-box-arrow-right"></i>
+            <span class="d-none d-sm-inline">Sign Out</span>
+          </button>
         </div>
       </div>
     </header>
@@ -1097,6 +1107,70 @@ document.addEventListener('DOMContentLoaded', () => {
   }, 500);
 });
 </script>
+
+  <!-- ═══════════════════════════════════════════════════
+       SECURE ADMINISTRATIVE LOGIN OVERLAY
+  ═══════════════════════════════════════════════════ -->
+  <div id="login-overlay">
+    <div class="login-card">
+      <div class="text-center">
+        <div class="login-brand-badge">
+          <i class="bi bi-shield-check"></i> Highway Authority Security Gateway
+        </div>
+        <div class="mb-3">
+          <i class="bi bi-person-badge-fill text-primary" style="font-size: 42px;"></i>
+        </div>
+        <h2 class="login-title">TollAI System Login</h2>
+        <p class="login-subtitle">Sign in with authorized administrative credentials</p>
+      </div>
+
+      <div id="login-error-alert" class="login-error-alert">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <span id="login-error-text">Invalid email or password</span>
+      </div>
+
+      <form id="login-form">
+        <div class="login-input-group">
+          <label for="login-email">Email Address</label>
+          <div class="login-input-wrapper">
+            <i class="bi bi-envelope-fill input-icon"></i>
+            <input type="email" id="login-email" placeholder="admin@gmail.com" required value="admin@gmail.com" autocomplete="username">
+          </div>
+        </div>
+
+        <div class="login-input-group">
+          <label for="login-password">Password</label>
+          <div class="login-input-wrapper">
+            <i class="bi bi-lock-fill input-icon"></i>
+            <input type="password" id="login-password" placeholder="••••••••" required autocomplete="current-password">
+            <button type="button" class="login-toggle-pwd" id="login-toggle-pwd-btn" title="Show/Hide Password">
+              <i class="bi bi-eye" id="pwd-eye-icon"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-4" style="font-size: 13px;">
+          <label class="d-flex align-items-center gap-2" style="cursor: pointer; color: var(--text-secondary);">
+            <input type="checkbox" id="login-remember" checked style="accent-color: #3b82f6;">
+            Remember credentials
+          </label>
+          <span class="badge bg-primary-subtle text-primary border border-primary-subtle" style="font-size: 11px;">Super Admin</span>
+        </div>
+
+        <button type="submit" class="login-btn" id="login-submit-btn">
+          <span>Sign In to Dashboard</span>
+          <i class="bi bi-box-arrow-in-right"></i>
+        </button>
+
+        <div class="login-hint-badge">
+          <i class="bi bi-key-fill text-warning"></i>
+          <div>
+            Authorized credentials: <strong>admin@gmail.com</strong> | <strong>12345678</strong>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
 
 </body>
 </html>

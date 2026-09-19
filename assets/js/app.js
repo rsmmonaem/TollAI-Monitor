@@ -529,7 +529,163 @@ const App = (() => {
     }
   }
 
+  // ── User Authentication ─────────────────────────────────
+  async function checkAuth() {
+    const token = localStorage.getItem('tollai_token');
+    const overlay = document.getElementById('login-overlay');
+    if (!token) {
+      if (overlay) overlay.classList.remove('hidden');
+      return false;
+    }
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authenticated && data.user) {
+          if (overlay) overlay.classList.add('hidden');
+          updateUserUI(data.user);
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn('Auth check fallback to cached login:', e);
+      if (token) {
+        if (overlay) overlay.classList.add('hidden');
+        return true;
+      }
+    }
+    if (overlay) overlay.classList.remove('hidden');
+    return false;
+  }
+
+  function updateUserUI(user) {
+    const email = user.email || 'admin@gmail.com';
+    const name = user.name || 'Admin Officer';
+    const emailEls = [
+      document.getElementById('sidebar-user-email'),
+      document.getElementById('topbar-user-email')
+    ];
+    emailEls.forEach(el => {
+      if (el) el.textContent = email;
+    });
+    const nameEls = [document.getElementById('sidebar-user-name')];
+    nameEls.forEach(el => {
+      if (el) el.textContent = name;
+    });
+  }
+
+  async function handleLoginSubmit(e) {
+    e.preventDefault();
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value.trim();
+    const errorAlert = document.getElementById('login-error-alert');
+    const errorText = document.getElementById('login-error-text');
+    const submitBtn = document.getElementById('login-submit-btn');
+
+    if (errorAlert) errorAlert.style.display = 'none';
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Signing in...';
+    }
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        localStorage.setItem('tollai_token', data.token);
+        localStorage.setItem('tollai_user', JSON.stringify(data.user));
+        updateUserUI(data.user);
+
+        const overlay = document.getElementById('login-overlay');
+        if (overlay) overlay.classList.add('hidden');
+
+        toast(`✅ Logged in as ${data.user.email}`, 'success');
+      } else {
+        if (errorAlert && errorText) {
+          errorText.textContent = data.error || 'Invalid email or password';
+          errorAlert.style.display = 'flex';
+        }
+        toast('Authentication failed', 'error');
+      }
+    } catch (err) {
+      // Offline / network fallback for admin@gmail.com / 12345678
+      if ((email.toLowerCase() === 'admin@gmail.com' || email.toLowerCase() === 'admin') && password === '12345678') {
+        const dummyUser = { email: 'admin@gmail.com', name: 'Admin Officer', role: 'Super Admin' };
+        localStorage.setItem('tollai_token', 'local-token-' + Date.now());
+        localStorage.setItem('tollai_user', JSON.stringify(dummyUser));
+        updateUserUI(dummyUser);
+        const overlay = document.getElementById('login-overlay');
+        if (overlay) overlay.classList.add('hidden');
+        toast('✅ Logged in successfully', 'success');
+      } else {
+        if (errorAlert && errorText) {
+          errorText.textContent = 'Invalid credentials. Please use admin@gmail.com and 12345678';
+          errorAlert.style.display = 'flex';
+        }
+      }
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span>Sign In to Dashboard</span><i class="bi bi-box-arrow-in-right ms-2"></i>';
+      }
+    }
+  }
+
+  async function handleLogout() {
+    const token = localStorage.getItem('tollai_token');
+    if (token) {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      } catch (e) {}
+    }
+    localStorage.removeItem('tollai_token');
+    localStorage.removeItem('tollai_user');
+    const overlay = document.getElementById('login-overlay');
+    if (overlay) overlay.classList.remove('hidden');
+    toast('🚪 Logged out successfully', 'info');
+  }
+
+  function setupAuthListeners() {
+    const form = document.getElementById('login-form');
+    if (form) form.addEventListener('submit', handleLoginSubmit);
+
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+
+    const topbarLogoutBtn = document.getElementById('topbar-logout-btn');
+    if (topbarLogoutBtn) topbarLogoutBtn.addEventListener('click', handleLogout);
+
+    const togglePwdBtn = document.getElementById('login-toggle-pwd-btn');
+    const pwdInput = document.getElementById('login-password');
+    const pwdEye = document.getElementById('pwd-eye-icon');
+    if (togglePwdBtn && pwdInput && pwdEye) {
+      togglePwdBtn.addEventListener('click', () => {
+        if (pwdInput.type === 'password') {
+          pwdInput.type = 'text';
+          pwdEye.className = 'bi bi-eye-slash';
+        } else {
+          pwdInput.type = 'password';
+          pwdEye.className = 'bi bi-eye';
+        }
+      });
+    }
+  }
+
   async function init() {
+    // 0. Auth Setup & Verification
+    setupAuthListeners();
+    checkAuth();
+
     // 1. Data
     await window.AppData.init();
 
