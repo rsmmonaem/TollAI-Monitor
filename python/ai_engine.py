@@ -508,7 +508,7 @@ class TollAIEngine:
             time.sleep(3.0)
 
     def _db_worker(self):
-        """Asynchronously writes captured vehicle images to disk and logs records to database."""
+        """Asynchronously writes captured vehicle images to disk and logs records to database with auto-reconnect."""
         while True:
             item = self.db_queue.get()
             if item is None:
@@ -527,10 +527,24 @@ class TollAIEngine:
                     'plate_conf':   round(plate_conf, 2),
                     'status':       status,
                 }
-                if self.conn and self.conn.is_connected():
-                    rec_id = insert_detection(self.conn, record)
-                    logger.info(f"[#{rec_id}] {vehicle_type:10} | Plate: {plate_text:20} | "
-                                f"Conf: {conf:.1%} | Toll: {toll}Tk | {img_path}")
+                
+                # Check connection health; reconnect if dropped
+                if not self.conn or not getattr(self.conn, 'is_connected', lambda: True)():
+                    self.conn = get_db_connection()
+
+                if self.conn:
+                    try:
+                        rec_id = insert_detection(self.conn, record)
+                        logger.info(f"[#{rec_id}] {vehicle_type:10} | Plate: {plate_text:20} | "
+                                    f"Conf: {conf:.1%} | Toll: {toll}Tk | {img_path}")
+                    except Exception as ins_err:
+                        # Attempt one reconnect and retry
+                        logger.debug(f"DB insert retry after error: {ins_err}")
+                        self.conn = get_db_connection()
+                        if self.conn:
+                            rec_id = insert_detection(self.conn, record)
+                            logger.info(f"[#{rec_id}] {vehicle_type:10} | Plate: {plate_text:20} | "
+                                        f"Conf: {conf:.1%} | Toll: {toll}Tk | {img_path}")
             except Exception as e:
                 logger.warning(f"Error in async DB worker: {e}")
             finally:
