@@ -10,6 +10,7 @@ If the database connection fails, falls back gracefully to in-memory mock data.
 import os
 import sys
 import time
+import threading
 import random
 import re
 import logging
@@ -204,49 +205,70 @@ def get_placeholder_bytes():
         except Exception as e:
             logger.error(f"Error converting placeholder to JPEG: {e}")
             
+def get_camera_placeholder(cam_id):
+    """Generate a clean visual 'Camera Offline' placeholder with camera metadata."""
     try:
-        # Generate a 640x360 dark slate frame dynamically
-        im = Image.new('RGB', (640, 360), color='#0f172a')
+        from PIL import ImageDraw
+        im = Image.new('RGB', (640, 360), color='#090d16')
+        draw = ImageDraw.Draw(im)
+        ch_info = NVR_CHANNELS.get(cam_id, {})
+        lane = ch_info.get('lane', 'Toll Lane')
+        ch = ch_info.get('channel', '---')
+        
+        # Grid frame
+        draw.rectangle([(15, 15), (625, 345)], outline='#1e293b', width=2)
+        draw.text((320, 140), f"CAM {cam_id} · NO SIGNAL", fill='#ef4444', anchor='mm')
+        draw.text((320, 175), f"NVR Channel {ch} (Hardware Offline)", fill='#94a3b8', anchor='mm')
+        draw.text((320, 205), lane, fill='#64748b', anchor='mm')
         out = BytesIO()
         im.save(out, format='JPEG', quality=75)
-        _placeholder_cache = out.getvalue()
-        return _placeholder_cache
+        return out.getvalue()
     except Exception:
-        _placeholder_cache = b'\xff\xd8\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9'
-        return _placeholder_cache
+        return get_placeholder_bytes()
 
-def fetch_nvr_snapshot(camera_id, max_age=0.2):
-    """Fetch live JPEG snapshot from NVR or use AI-processed frame if available."""
+def _background_nvr_poller():
+    """Continuously poll NVR cameras in background and update cache with zero streaming lag."""
+    logger.info("📡 Starting background NVR multi-camera poller...")
+    while True:
+        for cam_id, ch_info in list(NVR_CHANNELS.items()):
+            now = time.time()
+            # If camera is currently active with AI engine frames, skip polling NVR
+            if cam_id in latest_frames and (now - latest_frame_times.get(cam_id, 0) < 5.0):
+                continue
+            
+            ch = ch_info['channel']
+            url = f"http://{NVR_HOST}/ISAPI/Streaming/channels/{ch}/picture"
+            try:
+                resp = nvr_session.get(url, timeout=2.5)
+                if resp.status_code == 200 and resp.content and len(resp.content) > 1000:
+                    nvr_frame_cache[cam_id] = resp.content
+                    nvr_frame_cache_times[cam_id] = time.time()
+                elif resp.status_code == 503:
+                    if cam_id not in nvr_frame_cache:
+                        nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
+            except Exception:
+                if cam_id not in nvr_frame_cache:
+                    nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
+            time.sleep(0.08)
+        time.sleep(1.2)
+
+# Start background poller thread
+nvr_poller_thread = threading.Thread(target=_background_nvr_poller, daemon=True)
+nvr_poller_thread.start()
+
+def fetch_nvr_snapshot(camera_id, max_age=15.0):
+    """Fetch live JPEG snapshot from AI Engine or cached NVR frame."""
     now = time.time()
-    # If camera has AI processed frames that are fresh, prefer them
+    # 1. Prefer AI engine processed frame if available and recent
     if camera_id in latest_frames and (now - latest_frame_times.get(camera_id, 0) < 6.0):
         return latest_frames[camera_id]
-        
-    # If in NVR cache within max_age, return cached snapshot
-    if camera_id in nvr_frame_cache and (now - nvr_frame_cache_times.get(camera_id, 0) < max_age):
-        return nvr_frame_cache[camera_id]
-        
-    # If NVR connection recently failed, back off for 60 seconds to prevent thread blocking & spam
-    if now - nvr_fail_times.get(camera_id, 0) < 60.0:
-        return nvr_frame_cache.get(camera_id) or latest_frames.get(camera_id)
 
-    ch_info = NVR_CHANNELS.get(camera_id)
-    if not ch_info:
-        return latest_frames.get(camera_id)
-        
-    ch = ch_info['channel']
-    url = f"http://{NVR_HOST}/ISAPI/Streaming/channels/{ch}/picture"
-    try:
-        resp = nvr_session.get(url, timeout=0.4)
-        if resp.status_code == 200 and resp.content:
-            nvr_frame_cache[camera_id] = resp.content
-            nvr_frame_cache_times[camera_id] = now
-            return resp.content
-    except Exception as e:
-        nvr_fail_times[camera_id] = now
-        logger.debug(f"Snapshot fetch error for camera {camera_id}: {e}")
-        
-    return nvr_frame_cache.get(camera_id) or latest_frames.get(camera_id)
+    # 2. Return cached NVR frame from background poller
+    if camera_id in nvr_frame_cache:
+        return nvr_frame_cache[camera_id]
+
+    # 3. Fallback placeholder
+    return get_camera_placeholder(camera_id)
 
 @app.route('/api/camera/<int:camera_id>/frame', methods=['POST'])
 def upload_camera_frame(camera_id):
