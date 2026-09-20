@@ -914,12 +914,54 @@
           <button class="report-tab active" id="tab-daily" onclick="ReportsModule.setReportType('daily')">
             <i class="bi bi-calendar-day"></i> Daily
           </button>
+          <button class="report-tab" id="tab-slot" onclick="ReportsModule.setReportType('slot')">
+            <i class="bi bi-clock-history"></i> 8-Hour Shift / Slot
+          </button>
           <button class="report-tab" id="tab-weekly" onclick="ReportsModule.setReportType('weekly')">
             <i class="bi bi-calendar-week"></i> Weekly
           </button>
           <button class="report-tab" id="tab-monthly" onclick="ReportsModule.setReportType('monthly')">
             <i class="bi bi-calendar-month"></i> Monthly
           </button>
+        </div>
+
+        <!-- Shift & Slot Filter Control Panel -->
+        <div class="glass-card mb-4" id="slot-filter-panel">
+          <div class="card-body-custom py-3">
+            <div class="row g-3 align-items-end">
+              <div class="col-md-3">
+                <label class="form-label mb-1" style="font-size:12px;font-weight:600;color:var(--text-secondary);">
+                  <i class="bi bi-calendar-event me-1"></i> Select Date
+                </label>
+                <input type="date" id="report-date-input" class="form-control form-control-sm" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label mb-1" style="font-size:12px;font-weight:600;color:var(--text-secondary);">
+                  <i class="bi bi-stopwatch me-1"></i> Shift Slot (8-Hour Duty)
+                </label>
+                <select id="report-slot-select" class="form-select form-select-sm" onchange="ReportsModule.onSlotSelectChange(this.value)" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+                  <option value="slot1">Slot 1: Morning Shift (06:00 AM – 02:00 PM)</option>
+                  <option value="slot2" selected>Slot 2: Evening / Peak Shift (02:00 PM – 10:00 PM)</option>
+                  <option value="slot3">Slot 3: Night Shift (10:00 PM – 06:00 AM)</option>
+                  <option value="custom">Custom Time Slot (Specific Hours)</option>
+                </select>
+              </div>
+              <div class="col-md-3" id="custom-time-group" style="display:none;">
+                <label class="form-label mb-1" style="font-size:12px;font-weight:600;color:var(--text-secondary);">
+                  <i class="bi bi-clock me-1"></i> Start & End Time
+                </label>
+                <div class="d-flex gap-2">
+                  <input type="time" id="report-start-time" value="14:00" class="form-control form-control-sm" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+                  <input type="time" id="report-end-time" value="22:00" class="form-control form-control-sm" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+                </div>
+              </div>
+              <div class="col-md-2">
+                <button class="btn btn-sm btn-primary w-100 py-1" onclick="ReportsModule.applySlotFilter()" style="font-weight:600;display:flex;align-items:center;justify-content:center;gap:5px;height:31px;">
+                  <i class="bi bi-funnel-fill"></i> Filter Report
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Report Title -->

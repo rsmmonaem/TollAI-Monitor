@@ -609,23 +609,93 @@ def get_stats():
         'fraud_alerts': fraud_alerts
     })
 
+# ─────────────────────────────────────────────────────────────
+# 8-HOUR SHIFT / TIME SLOT HELPER
+# ─────────────────────────────────────────────────────────────
+
+def parse_slot_boundaries(target_date_str, slot_name, custom_start_time=None, custom_end_time=None):
+    """Calculate (start_datetime, end_datetime, label) based on 8-hour shift or custom inputs."""
+    if not target_date_str:
+        target_date_str = datetime.now().strftime('%Y-%m-%d')
+    try:
+        base_date = datetime.strptime(target_date_str, '%Y-%m-%d')
+    except Exception:
+        base_date = datetime.now()
+        target_date_str = base_date.strftime('%Y-%m-%d')
+
+    if slot_name == 'slot1':  # Morning Shift 06:00 - 14:00 (8 hrs)
+        start_dt = base_date.replace(hour=6, minute=0, second=0)
+        end_dt = base_date.replace(hour=13, minute=59, second=59)
+        label = f"Slot 1: Morning Shift (06:00 AM – 02:00 PM) · {target_date_str}"
+    elif slot_name == 'slot2':  # Evening Shift 14:00 - 22:00 (8 hrs / 2 PM - 10 PM)
+        start_dt = base_date.replace(hour=14, minute=0, second=0)
+        end_dt = base_date.replace(hour=21, minute=59, second=59)
+        label = f"Slot 2: Evening Shift (02:00 PM – 10:00 PM) · {target_date_str}"
+    elif slot_name == 'slot3':  # Night Shift 22:00 - 06:00 (8 hrs / crosses midnight)
+        start_dt = base_date.replace(hour=22, minute=0, second=0)
+        next_day = base_date + timedelta(days=1)
+        end_dt = next_day.replace(hour=5, minute=59, second=59)
+        label = f"Slot 3: Night Shift (10:00 PM – 06:00 AM) · {target_date_str}"
+    elif slot_name == 'custom' or (custom_start_time and custom_end_time):
+        sh, sm = map(int, (custom_start_time or '00:00').split(':')[:2])
+        eh, em = map(int, (custom_end_time or '23:59').split(':')[:2])
+        start_dt = base_date.replace(hour=sh, minute=sm, second=0)
+        if eh < sh or (eh == sh and em < sm):
+            end_dt = (base_date + timedelta(days=1)).replace(hour=eh, minute=em, second=59)
+        else:
+            end_dt = base_date.replace(hour=eh, minute=em, second=59)
+        label = f"Custom Slot ({custom_start_time or '00:00'} – {custom_end_time or '23:59'}) · {target_date_str}"
+    else:
+        start_dt = base_date.replace(hour=0, minute=0, second=0)
+        end_dt = base_date.replace(hour=23, minute=59, second=59)
+        label = f"Full Day · {target_date_str}"
+
+    return start_dt, end_dt, label
+
 @app.route('/api/detections', methods=['GET'])
 def get_detections():
     since_id = request.args.get('since_id', default=0, type=int)
     limit = request.args.get('limit', default=50, type=int)
+    target_date = request.args.get('date', default=None)
+    slot_name = request.args.get('slot', default=None)
+    custom_start = request.args.get('start_time', default=None)
+    custom_end = request.args.get('end_time', default=None)
+    vehicle_type_filter = request.args.get('vehicle_type', default=None)
+    camera_id_filter = request.args.get('camera_id', default=None, type=int)
     
     conn = get_db_connection()
     if conn:
         try:
             cursor = conn.cursor(dictionary=True)
-            query = """
+            where_clauses = ["id > %s"]
+            params = [since_id]
+
+            if slot_name:
+                start_dt, end_dt, _ = parse_slot_boundaries(target_date, slot_name, custom_start, custom_end)
+                where_clauses.append("entry_time >= %s AND entry_time <= %s")
+                params.extend([start_dt.strftime('%Y-%m-%d %H:%M:%S'), end_dt.strftime('%Y-%m-%d %H:%M:%S')])
+            elif target_date:
+                where_clauses.append("DATE(entry_time) = %s")
+                params.append(target_date)
+
+            if vehicle_type_filter:
+                where_clauses.append("vehicle_type = %s")
+                params.append(vehicle_type_filter)
+
+            if camera_id_filter:
+                where_clauses.append("camera_id = %s")
+                params.append(camera_id_filter)
+
+            where_sql = " AND ".join(where_clauses)
+            query = f"""
                 SELECT id, vehicle_type, plate_number, image_path, camera_id, entry_time, confidence, toll_amount, status
                 FROM vehicle_detections
-                WHERE id > %s
+                WHERE {where_sql}
                 ORDER BY entry_time DESC
                 LIMIT %s
             """
-            cursor.execute(query, (since_id, limit))
+            params.append(limit)
+            cursor.execute(query, tuple(params))
             results = cursor.fetchall()
             
             # Format datetime
@@ -1056,6 +1126,10 @@ def get_rate_history():
 @app.route('/api/reports', methods=['GET'])
 def get_report():
     report_type = request.args.get('type', default='daily')
+    slot_name = request.args.get('slot', default=None)
+    target_date = request.args.get('date', default=None)
+    custom_start = request.args.get('start_time', default=None)
+    custom_end = request.args.get('end_time', default=None)
     days_back = 0
     if report_type == 'weekly':
         days_back = 7
@@ -1066,30 +1140,74 @@ def get_report():
     if conn:
         try:
             cursor = conn.cursor(dictionary=True)
+            report_label = None
             
-            # Query grouped summary for selected timeframe
-            if days_back == 0:
+            # 1. Slot / Shift Based Report or Custom Date-Time Filter
+            if slot_name or report_type == 'slot' or (custom_start and custom_end):
+                effective_slot = slot_name or ('custom' if (custom_start and custom_end) else 'slot1')
+                start_dt, end_dt, report_label = parse_slot_boundaries(
+                    target_date, effective_slot, custom_start, custom_end
+                )
                 query = """
                     SELECT 
                         vehicle_type,
                         COUNT(*) as count,
                         COALESCE(SUM(toll_amount), 0) as revenue
                     FROM vehicle_detections
-                    WHERE DATE(entry_time) = CURDATE()
+                    WHERE entry_time >= %s AND entry_time <= %s
+                    GROUP BY vehicle_type
+                """
+                cursor.execute(query, (
+                    start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+                    end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                ))
+            elif report_type == 'weekly':
+                query = """
+                    SELECT 
+                        vehicle_type,
+                        COUNT(*) as count,
+                        COALESCE(SUM(toll_amount), 0) as revenue
+                    FROM vehicle_detections
+                    WHERE DATE(entry_time) >= SUBDATE(CURDATE(), 7)
+                    GROUP BY vehicle_type
+                """
+                cursor.execute(query)
+            elif report_type == 'monthly':
+                query = """
+                    SELECT 
+                        vehicle_type,
+                        COUNT(*) as count,
+                        COALESCE(SUM(toll_amount), 0) as revenue
+                    FROM vehicle_detections
+                    WHERE DATE(entry_time) >= SUBDATE(CURDATE(), 30)
                     GROUP BY vehicle_type
                 """
                 cursor.execute(query)
             else:
-                query = """
-                    SELECT 
-                        vehicle_type,
-                        COUNT(*) as count,
-                        COALESCE(SUM(toll_amount), 0) as revenue
-                    FROM vehicle_detections
-                    WHERE DATE(entry_time) >= SUBDATE(CURDATE(), %s)
-                    GROUP BY vehicle_type
-                """
-                cursor.execute(query, (days_back,))
+                # Daily report (today or specific date)
+                if target_date:
+                    query = """
+                        SELECT 
+                            vehicle_type,
+                            COUNT(*) as count,
+                            COALESCE(SUM(toll_amount), 0) as revenue
+                        FROM vehicle_detections
+                        WHERE DATE(entry_time) = %s
+                        GROUP BY vehicle_type
+                    """
+                    cursor.execute(query, (target_date,))
+                else:
+                    query = """
+                        SELECT 
+                            vehicle_type,
+                            COUNT(*) as count,
+                            COALESCE(SUM(toll_amount), 0) as revenue
+                        FROM vehicle_detections
+                        WHERE DATE(entry_time) = CURDATE()
+                        GROUP BY vehicle_type
+                    """
+                    cursor.execute(query)
+
             results = cursor.fetchall()
             
             # Get latest rates
@@ -1119,7 +1237,11 @@ def get_report():
             return jsonify({
                 'rows': rows,
                 'totalCount': total_count,
-                'totalRevenue': total_revenue
+                'totalRevenue': total_revenue,
+                'label': report_label,
+                'type': report_type,
+                'slot': slot_name,
+                'date': target_date
             })
         except Exception as e:
             logger.error(f"Error compiling report: {e}")
