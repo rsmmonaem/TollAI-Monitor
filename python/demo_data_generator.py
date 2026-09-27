@@ -25,15 +25,18 @@ from decimal import Decimal
 # ─────────────────────────────────────────────────────────────
 
 try:
-    from ai_engine import DB_CONFIG
+    from config import DB_CONFIG
 except ImportError:
-    DB_CONFIG = {
-        'host':     'localhost',
-        'port':     3306,
-        'database': 'toll_monitoring',
-        'user':     'root',
-        'password': ''
-    }
+    try:
+        from ai_engine import DB_CONFIG
+    except ImportError:
+        DB_CONFIG = {
+            'host':     'localhost',
+            'port':     3306,
+            'database': 'toll_monitoring',
+            'user':     'root',
+            'password': ''
+        }
 
 # Vehicle distribution (count per type)
 VEHICLE_DISTRIBUTION = {

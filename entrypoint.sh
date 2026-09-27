@@ -20,6 +20,7 @@ fi
 # 1. Start the Flask server in the background
 # Default PORT to 7860 (Hugging Face) or 5002 locally
 export PORT=${PORT:-7860}
+export ACTIVE_CAMERAS=${ACTIVE_CAMERAS:-"1,2"}
 echo "Starting Flask web server on port $PORT..."
 $PYTHON_BIN python/server.py &
 SERVER_PID=$!
@@ -49,18 +50,8 @@ if conn:
 #    2nd: Real NVR multi-camera streams (if 103.79.179.116 is reachable)
 #    3rd: Local traffic.mp4 demo file (fallback)
 #    4th: Webcam (/dev/video0 if present)
-NVR_ONLINE=0
-if $PYTHON_BIN -c "
-import requests, sys
-from requests.auth import HTTPDigestAuth
-try:
-    r = requests.get('http://103.79.179.116/ISAPI/Streaming/channels/101/picture', auth=HTTPDigestAuth('admin', 'nurbio2026'), timeout=2.5)
-    sys.exit(0 if r.status_code == 200 else 1)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null; then
-    NVR_ONLINE=1
-fi
+# Force NVR_ONLINE=1 to use RTSP streams for now
+NVR_ONLINE=1
 
 if [ -n "$CAM1_SOURCE" ]; then
     SOURCE="$CAM1_SOURCE"

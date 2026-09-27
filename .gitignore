@@ -9,10 +9,10 @@ __pycache__/
 *.pyd
 
 # Ignore local binary files (Weights and Archives)
-*.pt
-*.mp4
-Archive.zip
-assets/img/vehicles/toll_plaza.png
+# *.pt
+# *.mp4
+# Archive.zip
+# assets/img/vehicles/toll_plaza.png
 
 # Ignore local database and logs
 *.db
@@ -24,3 +24,8 @@ captured_vehicles/
 # Ignore OS files
 .DS_Store
 Thumbs.db
+
+Archive.zip
+
+# Ignore training outputs
+runs/

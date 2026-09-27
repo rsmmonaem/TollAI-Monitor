@@ -330,7 +330,10 @@ def get_db_connection():
     # 1. Try MySQL if available and not in backoff cooldown
     if MYSQL_AVAILABLE and (now - _mysql_last_attempt > _mysql_retry_interval):
         try:
-            from ai_engine import DB_CONFIG
+            try:
+                from config import DB_CONFIG
+            except ImportError:
+                from ai_engine import DB_CONFIG
             # Try to connect without DB first to ensure it exists
             config_no_db = {k: v for k, v in DB_CONFIG.items() if k != 'database'}
             conn = mysql.connector.connect(**config_no_db)
@@ -349,8 +352,12 @@ def get_db_connection():
                 logger.info(f"MySQL unavailable ({e}). Using SQLite for data persistence.")
                 _mysql_failure_logged = True
             
-    # 2. SQLite fallback (for local development and Hugging Face Spaces persistence)
-    db_path = Path(ROOT_DIR) / "toll_monitoring.db"
+    # 2. SQLite fallback (for local development, Hugging Face, or Windows standalone .exe)
+    db_env_path = os.environ.get("SQLITE_DB_PATH")
+    if db_env_path:
+        db_path = Path(db_env_path)
+    else:
+        db_path = Path(ROOT_DIR) / "toll_monitoring.db"
     try:
         raw_conn = sqlite3.connect(str(db_path), timeout=30.0, check_same_thread=False)
         raw_conn.execute("PRAGMA journal_mode=WAL;")

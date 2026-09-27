@@ -25,13 +25,24 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, jsonify, request, send_from_directory, Response
 from flask_cors import CORS
 
+import cv2
+from rtsp_manager import RTSPStreamManager
+rtsp_stream_manager = RTSPStreamManager()
+
+
 # Configure path to allow importing from the python directory
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from ai_engine import DB_CONFIG, TOLL_RATES
+try:
+    from config import DB_CONFIG, TOLL_RATES
+except ImportError:
+    from ai_engine import DB_CONFIG, TOLL_RATES
 
 # Initialize Flask App
-# Static files reside in the root directory (parent of python/)
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# Static files reside in the root directory (parent of python/ or bundled directory)
+if getattr(sys, 'frozen', False):
+    ROOT_DIR = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+else:
+    ROOT_DIR = os.environ.get('WEB_ROOT_DIR', os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 app = Flask(__name__, static_folder=ROOT_DIR, static_url_path='')
 CORS(app) # Enable CORS for development cross-origin requests
 
@@ -230,26 +241,35 @@ def get_camera_placeholder(cam_id):
 def _poll_single_cam(item):
     cam_id, ch_info = item
     ch = ch_info['channel']
-    url = f"http://{NVR_HOST}/ISAPI/Streaming/channels/{ch}/picture"
-    try:
-        resp = nvr_session.get(url, timeout=2.0)
-        if resp.status_code == 200 and resp.content and len(resp.content) > 1000:
-            nvr_frame_cache[cam_id] = resp.content
+    url = f"rtsp://admin:nurbio2026@103.79.179.116:56981/Streaming/Channels/{ch}"
+    
+    rtsp_stream_manager.start_stream(cam_id, url)
+    frame = rtsp_stream_manager.get_latest_frame(cam_id)
+    
+    if frame is not None:
+        try:
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            nvr_frame_cache[cam_id] = buffer.tobytes()
             nvr_frame_cache_times[cam_id] = time.time()
-        elif resp.status_code == 503:
-            if cam_id not in nvr_frame_cache:
-                nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
-    except Exception:
+        except Exception:
+            pass
+    else:
         if cam_id not in nvr_frame_cache:
             nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
 
 def _background_nvr_poller():
     """Continuously poll NVR cameras concurrently in background with zero streaming lag."""
-    logger.info("📡 Starting concurrent background NVR multi-camera poller...")
+    logger.info("📡 Starting concurrent background RTSP multi-camera poller...")
     pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="NVRPoller")
+    
+    # Only poll active cameras to save CPU from decoding 14 RTSP streams
+    active_cams_env = os.environ.get('ACTIVE_CAMERAS', '1,2')
+    active_cams = [int(c.strip()) for c in active_cams_env.split(',') if c.strip().isdigit()]
+    
     while True:
         try:
-            list(pool.map(_poll_single_cam, list(NVR_CHANNELS.items())))
+            items_to_poll = [(cid, info) for cid, info in NVR_CHANNELS.items() if cid in active_cams]
+            list(pool.map(_poll_single_cam, items_to_poll))
         except Exception as e:
             logger.debug(f"NVR poller batch notice: {e}")
         time.sleep(0.35)

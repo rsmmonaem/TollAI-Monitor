@@ -40,106 +40,43 @@ import argparse
 import logging
 from datetime import datetime
 from pathlib import Path
-from ultralytics import YOLO
-import torch
 
-# Global PyTorch inference optimizations
+# Safe AI imports (handles environments where PyTorch C++ DLLs or dependencies are missing)
+AI_AVAILABLE = False
+torch = None
+YOLO = None
+
 try:
-    torch.set_num_threads(max(1, min(6, (os.cpu_count() or 4))))
-    torch.set_grad_enabled(False)
-except Exception:
-    pass
+    import torch
+    try:
+        torch.set_num_threads(max(1, min(6, (os.cpu_count() or 4))))
+        torch.set_grad_enabled(False)
+    except Exception:
+        pass
+    from ultralytics import YOLO
+    AI_AVAILABLE = True
+except Exception as e:
+    logging.getLogger('AIEngine').warning(f"PyTorch/YOLO not available ({e}). AI engine will run in mock/standby mode.")
 
 # ─────────────────────────────────────────────────────────────
-# CONFIGURATION
+# CONFIGURATION (Imported from config.py)
 # ─────────────────────────────────────────────────────────────
-
-DB_CONFIG = {
-    'host':     os.environ.get('DB_HOST', 'localhost'),
-    'port':     int(os.environ.get('DB_PORT', 3306)),
-    'database': os.environ.get('DB_NAME', 'toll_monitoring'),
-    'user':     os.environ.get('DB_USER', 'root'),
-    'password': os.environ.get('DB_PASSWORD', '')
-}
-
-# Output directory for saved vehicle images
-OUTPUT_DIR = Path('captured_vehicles')
-OUTPUT_DIR.mkdir(exist_ok=True)
-
-# NVR Configuration and Channel Mapping (14 Channels)
-NVR_HOST = os.environ.get('NVR_HOST', '103.79.179.116')
-NVR_USER = os.environ.get('NVR_USER', 'admin')
-NVR_PASS = os.environ.get('NVR_PASS', 'nurbio2026')
-
-NVR_CHANNELS = {
-    1: {'channel': '101', 'name': 'Camera 1 (Ch 101 - Toll Lane A)', 'lane': 'Toll Lane A (Inbound)'},
-    2: {'channel': '201', 'name': 'Camera 2 (Ch 201 - Toll Lane B)', 'lane': 'Toll Lane B (Outbound)'},
-    3: {'channel': '301', 'name': 'Camera 3 (Ch 301 - Lane C Entry)', 'lane': 'Toll Lane C (Inbound)'},
-    4: {'channel': '401', 'name': 'Camera 4 (Ch 401 - Lane D Exit)', 'lane': 'Toll Lane D (Outbound)'},
-    5: {'channel': '501', 'name': 'Camera 5 (Ch 501 - Plaza Approach)', 'lane': 'Plaza Approach North'},
-    6: {'channel': '601', 'name': 'Camera 6 (Ch 601 - Plaza Departure)', 'lane': 'Plaza Departure South'},
-    7: {'channel': '701', 'name': 'Camera 7 (Ch 701 - Heavy Vehicle Lane)', 'lane': 'Heavy Vehicle Lane'},
-    8: {'channel': '801', 'name': 'Camera 8 (Ch 801 - FastPass / ETC 1)', 'lane': 'ETC FastPass Lane 1'},
-    9: {'channel': '901', 'name': 'Camera 9 (Ch 901 - FastPass / ETC 2)', 'lane': 'ETC FastPass Lane 2'},
-    10: {'channel': '1001', 'name': 'Camera 10 (Ch 1001 - Weighbridge A)', 'lane': 'Weighbridge Lane 1'},
-    11: {'channel': '1101', 'name': 'Camera 11 (Ch 1101 - Booth 1 Cabin)', 'lane': 'Toll Booth 1'},
-    12: {'channel': '1201', 'name': 'Camera 12 (Ch 1201 - Booth 2 Cabin)', 'lane': 'Toll Booth 2'},
-    13: {'channel': '1301', 'name': 'Camera 13 (Ch 1301 - Plaza Overview)', 'lane': 'Main Plaza Yard'},
-    14: {'channel': '1501', 'name': 'Camera 14 (Ch 1501 - Perimeter Security)', 'lane': 'Perimeter Guard Post'},
-}
-
-# Default Active Camera ID (backward compatibility)
-CAMERA_ID = 1
-
-# Confidence threshold for YOLO detections (0.16 handles extreme night glare from headlights)
-YOLO_CONF_THRESHOLD = float(os.environ.get('YOLO_CONF_THRESHOLD', 0.16))
-
-# Detection cooldown per plate (seconds) — prevents duplicate entries across cameras
-PLATE_COOLDOWN = int(os.environ.get('PLATE_COOLDOWN', 60))
-
-# Stationary cooldown window (seconds) — prevents duplicates for parked/standing vehicles
-STATIONARY_COOLDOWN = int(os.environ.get('STATIONARY_COOLDOWN', 120))
-
-# Grid cell size for spatial deduplication (fraction of frame width/height)
-SPATIAL_GRID_CELLS = 8  # divide frame into 8x8 zones
-
-# YOLO vehicle class IDs (COCO dataset)
-VEHICLE_CLASS_IDS = {
-    2:  'Car',
-    3:  'Bike',    # motorcycle
-    5:  'Bus',
-    7:  'Truck',
-}
-
-# Custom class mapping (if using custom YOLO model)
-CUSTOM_CLASS_MAP = {
-    'motorcycle': 'Bike',
-    'bike':       'Bike',
-    'bicycle':    'Bike',
-    'cng':        'CNG',
-    'auto':       'Auto',
-    'auto-rickshaw': 'Auto',
-    'pickup':     'Pickup',
-    'bus':        'Bus',
-    'truck':      'Truck',
-    'lorry':      'Lorry',
-    'covered-van':'Covered Van',
-    'car':        'Car',
-}
-
-# Toll rates (BDT)
-TOLL_RATES = {
-    'Bike':        5,
-    'CNG':        10,
-    'Auto':       10,
-    'Pickup':     20,
-    'Bus':        50,
-    'Truck':      50,
-    'Lorry':      60,
-    'Covered Van':40,
-    'Car':        20,
-    'Unknown':     0,
-}
+from config import (
+    DB_CONFIG,
+    OUTPUT_DIR,
+    NVR_HOST,
+    NVR_USER,
+    NVR_PASS,
+    NVR_CHANNELS,
+    CAMERA_ID,
+    YOLO_CONF_THRESHOLD,
+    PLATE_COOLDOWN,
+    STATIONARY_COOLDOWN,
+    SPATIAL_GRID_CELLS,
+    VEHICLE_CLASS_IDS,
+    CUSTOM_CLASS_MAP,
+    TOLL_RATES,
+)
 
 # ─────────────────────────────────────────────────────────────
 # LOGGING
@@ -498,7 +435,7 @@ def draw_hud(frame, fps: float, total_today: int, total_revenue: int):
 # ─────────────────────────────────────────────────────────────
 
 class TollAIEngine:
-    def __init__(self, source, model_path: str = 'yolov8s.pt', show_window: bool = True, camera_ids=None, port: int = None):
+    def __init__(self, source, model_path: str = 'best.pt', show_window: bool = True, camera_ids=None, port: int = None):
         self.source = source
         self.show_window = show_window
         self.port = int(port or os.environ.get('PORT', 5002))
@@ -1130,8 +1067,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='AI Toll Monitoring Engine')
     parser.add_argument('--source',  type=str, default='0',
                         help='Video source: 0=webcam, /path/to/video.mp4, rtsp://...')
-    parser.add_argument('--model',   type=str, default='yolov8s.pt',
-                        help='YOLO model path (default: yolov8s.pt — better accuracy than nano)')
+    parser.add_argument('--model',   type=str, default='best.pt',
+                        help='YOLO model path (default: best.pt)')
     parser.add_argument('--camera-id', type=int, default=None,
                         help='Single Camera ID (default: None)')
     parser.add_argument('--cameras', type=str, default=None,
