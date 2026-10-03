@@ -105,10 +105,20 @@ fi
 
 export ACTIVE_CAMERAS=${ACTIVE_CAMERAS:-"1,2"}
 
-echo "Starting YOLO AI engine with source: $SOURCE on Active Cameras: $ACTIVE_CAMERAS"
+if [ -z "$YOLO_MODEL" ]; then
+    if [ -f "best.pt" ]; then
+        YOLO_MODEL="best.pt"
+    elif [ -f "python/best.pt" ]; then
+        YOLO_MODEL="python/best.pt"
+    else
+        YOLO_MODEL="yolov8n.pt"
+    fi
+fi
+
+echo "Starting YOLO AI engine with source: $SOURCE on Active Cameras: $ACTIVE_CAMERAS (Model: $YOLO_MODEL)"
 # Run in headless mode without showing cv2 display window
 $PYTHON_BIN python/ai_engine.py --source "$SOURCE" --cameras "$ACTIVE_CAMERAS" --no-window \
-    --model "${YOLO_MODEL:-yolov8n.pt}" &
+    --model "$YOLO_MODEL" &
 AI_PID=$!
 
 # 4. Wait for the main Flask server process to keep the container active
