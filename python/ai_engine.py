@@ -35,6 +35,7 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import re
+import socket
 import time
 import argparse
 import logging
@@ -830,20 +831,150 @@ class TollAIEngine:
                     logger.debug(f"HTTP ISAPI probe failed: {e}")
         return None, None
 
+    def _open_video_capture(self, source):
+        """Robustly opens video source across macOS, Windows, and Linux with auto-fallbacks."""
+        # 1. Handle webcam index (e.g. 0, '0', 1, '1')
+        is_cam_idx = False
+        cam_idx = 0
+        if isinstance(source, int):
+            is_cam_idx = True
+            cam_idx = source
+        elif isinstance(source, str) and source.strip().isdigit():
+            is_cam_idx = True
+            cam_idx = int(source.strip())
+
+        if is_cam_idx:
+            # macOS: Prefer AVFoundation
+            if sys.platform == 'darwin':
+                try:
+                    cap = cv2.VideoCapture(cam_idx, cv2.CAP_AVFOUNDATION)
+                    if cap.isOpened():
+                        logger.info(f"📹 Opened macOS Camera {cam_idx} with AVFoundation")
+                        return cap
+                    cap.release()
+                except Exception:
+                    pass
+            # Windows: Prefer DirectShow to prevent device lockups
+            elif sys.platform.startswith('win'):
+                try:
+                    cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
+                    if cap.isOpened():
+                        logger.info(f"📹 Opened Windows Camera {cam_idx} with DirectShow")
+                        return cap
+                    cap.release()
+                except Exception:
+                    pass
+                try:
+                    cap = cv2.VideoCapture(cam_idx, cv2.CAP_MSMF)
+                    if cap.isOpened():
+                        logger.info(f"📹 Opened Windows Camera {cam_idx} with MSMF")
+                        return cap
+                    cap.release()
+                except Exception:
+                    pass
+            # Linux: Prefer V4L2
+            elif sys.platform.startswith('linux'):
+                try:
+                    cap = cv2.VideoCapture(cam_idx, cv2.CAP_V4L2)
+                    if cap.isOpened():
+                        logger.info(f"📹 Opened Linux Camera {cam_idx} with V4L2")
+                        return cap
+                    cap.release()
+                except Exception:
+                    pass
+
+            # Default generic VideoCapture fallback
+            try:
+                cap = cv2.VideoCapture(cam_idx)
+                if cap.isOpened():
+                    logger.info(f"📹 Opened Camera {cam_idx} with default backend")
+                    return cap
+                cap.release()
+            except Exception:
+                pass
+            logger.warning(f"⚠️ Could not open webcam index {cam_idx}")
+            return None
+
+        # 2. Handle RTSP stream
+        if isinstance(source, str) and source.startswith('rtsp://'):
+            from rtsp_manager import is_rtsp_reachable
+            if not is_rtsp_reachable(source, timeout=1.5):
+                logger.warning(f"⚠️ RTSP host {source} is unreachable. Skipping direct VideoCapture.")
+                return None
+            try:
+                cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+                if cap.isOpened():
+                    logger.info(f"📹 Opened RTSP stream: {source}")
+                    return cap
+                cap.release()
+            except Exception as e:
+                logger.warning(f"RTSP open error: {e}")
+            return None
+
+        # 3. Handle local video file
+        if isinstance(source, str) and os.path.exists(source):
+            try:
+                cap = cv2.VideoCapture(source)
+                if cap.isOpened():
+                    return cap
+                cap.release()
+            except Exception:
+                pass
+
+        # 4. Standard VideoCapture attempt
+        try:
+            cap = cv2.VideoCapture(source)
+            if cap.isOpened():
+                return cap
+            cap.release()
+        except Exception:
+            pass
+
+        return None
+
     def run(self):
         """Main processing loop."""
-        os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;tcp|timeout;4000000'
+        os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;tcp|stimeout;2000000|max_delay;500000'
         cap = None
         http_session = None
         http_url = None
 
-        # 1. Try OpenCV VideoCapture first (unless direct http:// or nvr mode)
-        if not (isinstance(self.source, str) and (self.source.startswith('http') or self.source.lower() == 'nvr')):
-            cap = cv2.VideoCapture(self.source)
-            if not cap.isOpened():
-                logger.warning(f"⚠️ Cannot open primary source '{self.source}'. Probing HTTP ISAPI fallback...")
-                cap = None
+        # Check if source is 'nvr'
+        is_nvr_source = isinstance(self.source, str) and self.source.lower() == 'nvr'
+
+        if is_nvr_source:
+            # Check if NVR is reachable
+            from rtsp_manager import is_rtsp_reachable
+            nvr_test_url = "rtsp://admin:nurbio2026@103.79.179.116:56981/Streaming/Channels/101"
+            if is_rtsp_reachable(nvr_test_url, timeout=1.5):
+                logger.info("📹 Source: Real NVR Multi-Channel Stream Mode active (14-channel live capture)")
             else:
+                logger.warning("⚠️ Real NVR at 103.79.179.116 is OFFLINE or unreachable.")
+                # Auto-fallback to local traffic.mp4 demo file if available
+                sample_candidates = ['traffic.mp4', 'python/traffic.mp4', os.path.join(os.path.dirname(__file__), '..', 'traffic.mp4')]
+                fallback_video = next((p for p in sample_candidates if os.path.exists(p)), None)
+                if fallback_video:
+                    logger.info(f"🔄 Auto-falling back to local demo video: {fallback_video}")
+                    self.source = fallback_video
+                    is_nvr_source = False
+                else:
+                    logger.info("Falling back to local camera / web upload mode...")
+                    self.source = '0'
+                    is_nvr_source = False
+
+        # If not NVR mode and not direct http, try opening video capture
+        if not is_nvr_source and not (isinstance(self.source, str) and self.source.startswith('http')):
+            cap = self._open_video_capture(self.source)
+            if cap is None:
+                # If primary source failed, try sample video fallback before giving up
+                sample_candidates = ['traffic.mp4', 'python/traffic.mp4', os.path.join(os.path.dirname(__file__), '..', 'traffic.mp4')]
+                fallback_video = next((p for p in sample_candidates if os.path.exists(p) and p != self.source), None)
+                if fallback_video:
+                    logger.info(f"🔄 Falling back to sample video: {fallback_video}")
+                    self.source = fallback_video
+                    cap = self._open_video_capture(fallback_video)
+
+            if cap is not None and cap.isOpened():
                 try:
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 except Exception:
@@ -851,16 +982,17 @@ class TollAIEngine:
                 src_fps = cap.get(cv2.CAP_PROP_FPS) or 30
                 width   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                 height  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                logger.info(f"📹 Source: {self.source} | {width}x{height} @ {src_fps:.1f} FPS")
-        elif isinstance(self.source, str) and self.source.lower() == 'nvr':
-            logger.info("📹 Source: Real NVR Multi-Channel Stream Mode active (14-channel live capture)")
+                logger.info(f"📹 Video Source Ready: {self.source} | {width}x{height} @ {src_fps:.1f} FPS")
+            else:
+                logger.warning(f"⚠️ Cannot open capture for source '{self.source}'. Probing HTTP ISAPI fallback...")
+                cap = None
 
         # 2. If cap failed to open or source is HTTP, probe HTTP ISAPI stream
         self.running = True
         latest_http_frame = None
         frame_lock = threading.Lock()
 
-        if cap is None and isinstance(self.source, str):
+        if cap is None and isinstance(self.source, str) and not is_nvr_source:
             http_session, http_url = self._setup_http_isapi()
             if http_url:
                 logger.info(f"📹 Live HTTP stream active: {http_url}")

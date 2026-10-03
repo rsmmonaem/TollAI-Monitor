@@ -110,9 +110,21 @@ def run_ai_engine():
         source = os.environ.get('CAM1_SOURCE', video_sample if os.path.exists(video_sample) else '0')
         logger.info(f"AI Engine source: {source}")
 
-        # Import AI engine
         import ai_engine
-        # ai_engine can be run in threaded mode if available
+        model_sample = os.path.join(BUNDLE_DIR, 'best.pt')
+        if not os.path.exists(model_sample):
+            model_sample = os.path.join(BUNDLE_DIR, 'yolov8n.pt')
+        if not os.path.exists(model_sample):
+            model_sample = 'yolov8n.pt'
+
+        engine = ai_engine.TollAIEngine(
+            source=source,
+            model_path=model_sample,
+            show_window=False,
+            camera_ids=[1, 2],
+            port=PORT
+        )
+        engine.run()
     except Exception as e:
         logger.info(f"AI Engine running in mock/demo mode ({e}). Dashboard is fully operational.")
 
@@ -130,7 +142,7 @@ if __name__ == '__main__':
     print("=" * 65)
     print("   🛣️  TOLLAI MONITOR - HIGHWAY AUTHORITY MONITORING SYSTEM")
     print("=" * 65)
-    print(f"[*] Starting system on local Windows PC...")
+    print(f"[*] Starting system on local computer...")
     print(f"[*] Database: SQLite ({os.environ['SQLITE_DB_PATH']})")
     print(f"[*] Web Interface: http://localhost:{PORT}")
     print("=" * 65)
@@ -142,7 +154,11 @@ if __name__ == '__main__':
     server_thread = threading.Thread(target=run_flask_server, daemon=True)
     server_thread.start()
 
-    # 3. Open browser automatically
+    # 3. Start AI Detection Engine in background thread
+    ai_thread = threading.Thread(target=run_ai_engine, daemon=True)
+    ai_thread.start()
+
+    # 4. Open browser automatically
     browser_thread = threading.Thread(target=open_browser, daemon=True)
     browser_thread.start()
 

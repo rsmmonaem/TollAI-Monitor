@@ -50,8 +50,17 @@ if conn:
 #    2nd: Real NVR multi-camera streams (if 103.79.179.116 is reachable)
 #    3rd: Local traffic.mp4 demo file (fallback)
 #    4th: Webcam (/dev/video0 if present)
-# Force NVR_ONLINE=1 to use RTSP streams for now
-NVR_ONLINE=1
+NVR_ONLINE=0
+if $PYTHON_BIN -c "
+import socket, sys
+try:
+    with socket.create_connection(('103.79.179.116', 56981), timeout=1.5):
+        sys.exit(0)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+    NVR_ONLINE=1
+fi
 
 if [ -n "$CAM1_SOURCE" ]; then
     SOURCE="$CAM1_SOURCE"

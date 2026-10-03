@@ -13,6 +13,7 @@ import time
 import threading
 import random
 import re
+import socket
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -257,6 +258,13 @@ def _poll_single_cam(item):
         if cam_id not in nvr_frame_cache:
             nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
 
+def _is_nvr_reachable(timeout=1.5):
+    try:
+        with socket.create_connection((NVR_HOST, 56981), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
 def _background_nvr_poller():
     """Continuously poll NVR cameras concurrently in background with zero streaming lag."""
     logger.info("📡 Starting concurrent background RTSP multi-camera poller...")
@@ -266,13 +274,30 @@ def _background_nvr_poller():
     active_cams_env = os.environ.get('ACTIVE_CAMERAS', '1,2')
     active_cams = [int(c.strip()) for c in active_cams_env.split(',') if c.strip().isdigit()]
     
+    last_check_time = 0.0
+    nvr_online = False
+
     while True:
         try:
-            items_to_poll = [(cid, info) for cid, info in NVR_CHANNELS.items() if cid in active_cams]
-            list(pool.map(_poll_single_cam, items_to_poll))
+            now = time.time()
+            if now - last_check_time > 20.0:
+                last_check_time = now
+                nvr_online = _is_nvr_reachable(timeout=1.5)
+                if not nvr_online:
+                    logger.info(f"NVR host {NVR_HOST}:56981 is offline/unreachable. Standing by...")
+                    for cid in active_cams:
+                        if cid not in nvr_frame_cache:
+                            nvr_frame_cache[cid] = get_camera_placeholder(cid)
+
+            if nvr_online:
+                items_to_poll = [(cid, info) for cid, info in NVR_CHANNELS.items() if cid in active_cams]
+                list(pool.map(_poll_single_cam, items_to_poll))
+                time.sleep(0.35)
+            else:
+                time.sleep(5.0)
         except Exception as e:
             logger.debug(f"NVR poller batch notice: {e}")
-        time.sleep(0.35)
+            time.sleep(1.0)
 
 # Start background poller thread
 nvr_poller_thread = threading.Thread(target=_background_nvr_poller, daemon=True)
