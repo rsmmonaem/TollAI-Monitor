@@ -53,11 +53,13 @@ if conn:
 NVR_ONLINE=0
 if $PYTHON_BIN -c "
 import socket, sys
-try:
-    with socket.create_connection(('103.79.179.116', 56981), timeout=1.5):
-        sys.exit(0)
-except Exception:
-    sys.exit(1)
+for port in [80, 56981, 554]:
+    try:
+        with socket.create_connection(('103.79.179.116', port), timeout=1.5):
+            sys.exit(0)
+    except Exception:
+        pass
+sys.exit(1)
 " 2>/dev/null; then
     NVR_ONLINE=1
 fi

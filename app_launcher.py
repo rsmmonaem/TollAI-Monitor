@@ -107,7 +107,7 @@ def run_ai_engine():
         if not os.path.exists(video_sample):
             video_sample = os.path.join(APP_DIR, 'traffic.mp4')
 
-        source = os.environ.get('CAM1_SOURCE', video_sample if os.path.exists(video_sample) else '0')
+        source = os.environ.get('CAM1_SOURCE', 'nvr')
         logger.info(f"AI Engine source: {source}")
 
         import ai_engine

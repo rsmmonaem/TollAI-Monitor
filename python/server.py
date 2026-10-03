@@ -242,40 +242,49 @@ def get_camera_placeholder(cam_id):
 def _poll_single_cam(item):
     cam_id, ch_info = item
     ch = ch_info['channel']
-    url = f"rtsp://admin:nurbio2026@103.79.179.116:56981/Streaming/Channels/{ch}"
     
-    rtsp_stream_manager.start_stream(cam_id, url)
-    frame = rtsp_stream_manager.get_latest_frame(cam_id)
-    
-    if frame is not None:
-        try:
+    # 1. Direct real CCTV camera frame via HTTP ISAPI (port 80)
+    try:
+        r = nvr_session.get(f"http://{NVR_HOST}/ISAPI/Streaming/channels/{ch}/picture", timeout=1.8)
+        if r.status_code == 200 and len(r.content) > 1000:
+            nvr_frame_cache[cam_id] = r.content
+            nvr_frame_cache_times[cam_id] = time.time()
+            return
+    except Exception:
+        pass
+
+    # 2. RTSP stream fallback (port 56981)
+    try:
+        url = f"rtsp://{NVR_USER}:{NVR_PASS}@{NVR_HOST}:56981/Streaming/Channels/{ch}"
+        rtsp_stream_manager.start_stream(cam_id, url)
+        frame = rtsp_stream_manager.get_latest_frame(cam_id)
+        if frame is not None:
             _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
             nvr_frame_cache[cam_id] = buffer.tobytes()
             nvr_frame_cache_times[cam_id] = time.time()
-        except Exception:
-            pass
-    else:
-        if cam_id not in nvr_frame_cache:
-            nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
+            return
+    except Exception:
+        pass
+
+    if cam_id not in nvr_frame_cache:
+        nvr_frame_cache[cam_id] = get_camera_placeholder(cam_id)
 
 def _is_nvr_reachable(timeout=1.5):
-    try:
-        with socket.create_connection((NVR_HOST, 56981), timeout=timeout):
-            return True
-    except Exception:
-        return False
+    for port in [80, 56981, 554]:
+        try:
+            with socket.create_connection((NVR_HOST, port), timeout=timeout):
+                return True
+        except Exception:
+            continue
+    return False
 
 def _background_nvr_poller():
-    """Continuously poll NVR cameras concurrently in background with zero streaming lag."""
-    logger.info("📡 Starting concurrent background RTSP multi-camera poller...")
-    pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="NVRPoller")
-    
-    # Only poll active cameras to save CPU from decoding 14 RTSP streams
-    active_cams_env = os.environ.get('ACTIVE_CAMERAS', '1,2')
-    active_cams = [int(c.strip()) for c in active_cams_env.split(',') if c.strip().isdigit()]
+    """Continuously poll real CCTV cameras concurrently in background with zero streaming lag."""
+    logger.info("📡 Starting concurrent background real CCTV multi-camera poller...")
+    pool = ThreadPoolExecutor(max_workers=14, thread_name_prefix="NVRPoller")
     
     last_check_time = 0.0
-    nvr_online = False
+    nvr_online = True
 
     while True:
         try:
@@ -284,15 +293,12 @@ def _background_nvr_poller():
                 last_check_time = now
                 nvr_online = _is_nvr_reachable(timeout=1.5)
                 if not nvr_online:
-                    logger.info(f"NVR host {NVR_HOST}:56981 is offline/unreachable. Standing by...")
-                    for cid in active_cams:
-                        if cid not in nvr_frame_cache:
-                            nvr_frame_cache[cid] = get_camera_placeholder(cid)
+                    logger.info(f"NVR host {NVR_HOST} is offline/unreachable. Standing by...")
 
             if nvr_online:
-                items_to_poll = [(cid, info) for cid, info in NVR_CHANNELS.items() if cid in active_cams]
+                items_to_poll = list(NVR_CHANNELS.items())
                 list(pool.map(_poll_single_cam, items_to_poll))
-                time.sleep(0.35)
+                time.sleep(0.3)
             else:
                 time.sleep(5.0)
         except Exception as e:

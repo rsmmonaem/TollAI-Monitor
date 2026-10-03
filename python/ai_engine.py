@@ -939,41 +939,18 @@ class TollAIEngine:
         http_session = None
         http_url = None
 
-        # Check if source is 'nvr'
-        is_nvr_source = isinstance(self.source, str) and self.source.lower() == 'nvr'
+        # Check if source is 'nvr' or CCTV NVR stream
+        is_nvr_source = (
+            isinstance(self.source, str) and
+            (self.source.lower() == 'nvr' or '103.79.179.116' in self.source)
+        )
 
         if is_nvr_source:
-            # Check if NVR is reachable
-            from rtsp_manager import is_rtsp_reachable
-            nvr_test_url = "rtsp://admin:nurbio2026@103.79.179.116:56981/Streaming/Channels/101"
-            if is_rtsp_reachable(nvr_test_url, timeout=1.5):
-                logger.info("📹 Source: Real NVR Multi-Channel Stream Mode active (14-channel live capture)")
-            else:
-                logger.warning("⚠️ Real NVR at 103.79.179.116 is OFFLINE or unreachable.")
-                # Auto-fallback to local traffic.mp4 demo file if available
-                sample_candidates = ['traffic.mp4', 'python/traffic.mp4', os.path.join(os.path.dirname(__file__), '..', 'traffic.mp4')]
-                fallback_video = next((p for p in sample_candidates if os.path.exists(p)), None)
-                if fallback_video:
-                    logger.info(f"🔄 Auto-falling back to local demo video: {fallback_video}")
-                    self.source = fallback_video
-                    is_nvr_source = False
-                else:
-                    logger.info("Falling back to local camera / web upload mode...")
-                    self.source = '0'
-                    is_nvr_source = False
+            logger.info("📹 Source: Real CCTV Multi-Channel NVR (103.79.179.116) active — Processing Real CCTV Cameras!")
 
         # If not NVR mode and not direct http, try opening video capture
         if not is_nvr_source and not (isinstance(self.source, str) and self.source.startswith('http')):
             cap = self._open_video_capture(self.source)
-            if cap is None:
-                # If primary source failed, try sample video fallback before giving up
-                sample_candidates = ['traffic.mp4', 'python/traffic.mp4', os.path.join(os.path.dirname(__file__), '..', 'traffic.mp4')]
-                fallback_video = next((p for p in sample_candidates if os.path.exists(p) and p != self.source), None)
-                if fallback_video:
-                    logger.info(f"🔄 Falling back to sample video: {fallback_video}")
-                    self.source = fallback_video
-                    cap = self._open_video_capture(fallback_video)
-
             if cap is not None and cap.isOpened():
                 try:
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -1070,10 +1047,11 @@ class TollAIEngine:
                     time.sleep(0.02)
                     continue
 
-                # 2. Process real NVR camera frames concurrently if source is 'nvr'
-                if isinstance(self.source, str) and self.source.lower() == 'nvr':
+                # 2. Process real NVR camera frames concurrently if source is NVR / CCTV
+                if is_nvr_source:
                     def _handle_nvr_cam(cam_id):
                         raw_frame = None
+                        # Try cached raw NVR frame from server
                         try:
                             res = self.http_session.get(f"http://localhost:{self.port}/api/camera/{cam_id}/raw_nvr_frame", timeout=0.35)
                             if res.status_code == 200 and res.content and len(res.content) > 1000:
@@ -1081,6 +1059,19 @@ class TollAIEngine:
                                 raw_frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                         except Exception:
                             pass
+
+                        # If server cache doesn't have it yet, query NVR ISAPI directly
+                        if raw_frame is None:
+                            ch_map = {1: '101', 2: '201', 3: '301', 4: '401', 5: '501', 6: '601', 7: '701', 8: '801', 9: '901', 10: '1001', 11: '1101', 12: '1201', 13: '1301', 14: '1501'}
+                            ch = ch_map.get(cam_id, f'{cam_id}01')
+                            try:
+                                r = requests.get(f"http://103.79.179.116/ISAPI/Streaming/channels/{ch}/picture",
+                                                 auth=HTTPDigestAuth('admin', 'nurbio2026'), timeout=1.0)
+                                if r.status_code == 200 and len(r.content) > 1000:
+                                    arr = np.frombuffer(r.content, np.uint8)
+                                    raw_frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                            except Exception:
+                                pass
 
                         if raw_frame is not None:
                             if raw_frame.shape[1] > 960:
