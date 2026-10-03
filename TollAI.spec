@@ -22,6 +22,12 @@ for src, dst in list(extra_datas):
 if os.path.exists('best.pt'):
     extra_datas.append(('best.pt', '.'))
 
+# Collect ultralytics data files (default.yaml, bytetrack.yaml, etc.)
+try:
+    extra_datas += collect_data_files('ultralytics')
+except Exception:
+    pass
+
 hidden_imports = [
     'sqlite3',
     'flask',
@@ -36,6 +42,12 @@ hidden_imports = [
     'server',
     'demo_data_generator',
     'rtsp_manager',
+    'ai_engine',
+    'ultralytics',
+    'torch',
+    'torchvision',
+    'yaml',
+    'multiprocessing',
 ]
 
 a = Analysis(

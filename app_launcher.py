@@ -44,14 +44,14 @@ if BUNDLE_DIR not in sys.path:
 os.environ['SQLITE_DB_PATH'] = os.path.join(APP_DIR, 'toll_monitoring.db')
 os.environ['PERSISTENT_DATA_DIR'] = APP_DIR
 
-# Set port (default 5001 or find free port)
-PORT = int(os.environ.get('PORT', 5001))
+# Set port (default 7860 to match standard TollAI deployment or find free port)
+PORT = int(os.environ.get('PORT', 7860))
 
 def is_port_in_use(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         return s.connect_ex(('127.0.0.1', port)) == 0
 
-def find_available_port(start_port=5001):
+def find_available_port(start_port=7860):
     port = start_port
     while is_port_in_use(port) and port < start_port + 20:
         port += 1
@@ -94,28 +94,58 @@ def run_flask_server():
         from server import app, ROOT_DIR
         logger.info(f"Serving web dashboard from: {ROOT_DIR}")
         logger.info(f"Flask API server running on http://127.0.0.1:{PORT}")
-        app.run(host='127.0.0.1', port=PORT, debug=False, use_reloader=False)
+        app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
     except Exception as e:
-        logger.error(f"Flask server error: {e}")
+        logger.error(f"Flask server error: {e}", exc_info=True)
+
+def is_nvr_online(host='103.79.179.116', timeout=1.5):
+    for port in [80, 56981, 554]:
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except Exception:
+            pass
+    return False
 
 def run_ai_engine():
-    """Runs the AI Engine in background if configured, or falls back gracefully."""
+    """Runs the AI Engine in background with smart camera detection."""
     try:
-        logger.info("Checking for AI video feed / cameras...")
-        # Determine source
-        video_sample = os.path.join(BUNDLE_DIR, 'traffic.mp4')
-        if not os.path.exists(video_sample):
-            video_sample = os.path.join(APP_DIR, 'traffic.mp4')
+        logger.info("Initializing AI Video Engine...")
+        
+        # 1. Determine camera/video source
+        source = os.environ.get('CAM1_SOURCE')
+        if not source:
+            if is_nvr_online():
+                logger.info("✅ Real NVR at 103.79.179.116 is ONLINE. Using real multi-camera NVR streams!")
+                source = 'nvr'
+            else:
+                video_sample = os.path.join(APP_DIR, 'traffic.mp4')
+                if not os.path.exists(video_sample):
+                    video_sample = os.path.join(BUNDLE_DIR, 'traffic.mp4')
+                
+                if os.path.exists(video_sample):
+                    logger.info(f"📹 NVR offline or unreachable. Falling back to local video: {video_sample}")
+                    source = video_sample
+                else:
+                    logger.info("📹 NVR offline and no traffic.mp4. Falling back to default webcam (0)...")
+                    source = "0"
 
-        source = os.environ.get('CAM1_SOURCE', 'nvr')
-        logger.info(f"AI Engine source: {source}")
+        logger.info(f"AI Engine source set to: {source}")
 
         import ai_engine
-        model_sample = os.path.join(BUNDLE_DIR, 'best.pt')
+        
+        # 2. Locate model: prefer best.pt, then yolov8n.pt
+        model_sample = os.path.join(APP_DIR, 'best.pt')
+        if not os.path.exists(model_sample):
+            model_sample = os.path.join(BUNDLE_DIR, 'best.pt')
+        if not os.path.exists(model_sample):
+            model_sample = os.path.join(APP_DIR, 'yolov8n.pt')
         if not os.path.exists(model_sample):
             model_sample = os.path.join(BUNDLE_DIR, 'yolov8n.pt')
         if not os.path.exists(model_sample):
-            model_sample = 'yolov8n.pt'
+            model_sample = 'best.pt'
+
+        logger.info(f"AI Engine model: {model_sample}")
 
         engine = ai_engine.TollAIEngine(
             source=source,
@@ -126,12 +156,12 @@ def run_ai_engine():
         )
         engine.run()
     except Exception as e:
-        logger.info(f"AI Engine running in mock/demo mode ({e}). Dashboard is fully operational.")
+        logger.error(f"AI Engine error: {e}", exc_info=True)
 
 def open_browser():
     """Wait for server to be responsive, then open default web browser."""
     url = f"http://localhost:{PORT}"
-    time.sleep(1.8)  # give Flask a moment to bind
+    time.sleep(2.0)  # give Flask a moment to bind
     logger.info(f"Opening browser at: {url}")
     webbrowser.open(url)
 
@@ -139,6 +169,9 @@ def open_browser():
 # MAIN ENTRYPOINT
 # ─────────────────────────────────────────────────────────────
 if __name__ == '__main__':
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     print("=" * 65)
     print("   🛣️  TOLLAI MONITOR - HIGHWAY AUTHORITY MONITORING SYSTEM")
     print("=" * 65)

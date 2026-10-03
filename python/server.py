@@ -144,7 +144,11 @@ def serve_assets(path):
 
 @app.route('/captured_vehicles/<path:filename>')
 def serve_captured_vehicles(filename):
-    return send_from_directory(os.path.join(ROOT_DIR, 'captured_vehicles'), filename)
+    data_dir = os.environ.get('PERSISTENT_DATA_DIR', ROOT_DIR)
+    target = os.path.join(data_dir, 'captured_vehicles')
+    if not os.path.exists(target):
+        target = os.path.join(ROOT_DIR, 'captured_vehicles')
+    return send_from_directory(target, filename)
 
 # ─────────────────────────────────────────────────────────────
 # LIVE CAMERA VIDEO STREAMING & 14-CHANNEL NVR PROXY

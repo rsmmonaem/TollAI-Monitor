@@ -513,7 +513,7 @@ class TollAIEngine:
         """Polls Flask /api/ai/cameras every 3 seconds to dynamically sync selected cameras from UI."""
         while self.running:
             try:
-                url = f"http://localhost:{self.port}/api/ai/cameras"
+                url = f"http://127.0.0.1:{self.port}/api/ai/cameras"
                 req = urllib.request.Request(url)
                 with urllib.request.urlopen(req, timeout=1.0) as res:
                     if res.status == 200:
@@ -1013,7 +1013,7 @@ class TollAIEngine:
                 raw_frame = None
                 webcam_cam_id = None
                 try:
-                    res = self.http_session.get(f"http://localhost:{self.port}/api/camera/raw_active_frame", timeout=0.08)
+                    res = self.http_session.get(f"http://127.0.0.1:{self.port}/api/camera/raw_active_frame", timeout=0.08)
                     if res.status_code == 200 and res.content:
                         nparr = np.frombuffer(res.content, np.uint8)
                         raw_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -1032,7 +1032,7 @@ class TollAIEngine:
                     try:
                         _, jpeg = cv2.imencode('.jpg', processed, [cv2.IMWRITE_JPEG_QUALITY, 65])
                         self.http_session.post(
-                            f"http://localhost:{self.port}/api/camera/{webcam_cam_id}/frame",
+                            f"http://127.0.0.1:{self.port}/api/camera/{webcam_cam_id}/frame",
                             data=jpeg.tobytes(),
                             headers={'Content-Type': 'image/jpeg'},
                             timeout=0.15
@@ -1053,7 +1053,7 @@ class TollAIEngine:
                         raw_frame = None
                         # Try cached raw NVR frame from server
                         try:
-                            res = self.http_session.get(f"http://localhost:{self.port}/api/camera/{cam_id}/raw_nvr_frame", timeout=0.35)
+                            res = self.http_session.get(f"http://127.0.0.1:{self.port}/api/camera/{cam_id}/raw_nvr_frame", timeout=0.35)
                             if res.status_code == 200 and res.content and len(res.content) > 1000:
                                 arr = np.frombuffer(res.content, np.uint8)
                                 raw_frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -1082,7 +1082,7 @@ class TollAIEngine:
                             _, jpeg = cv2.imencode('.jpg', proc_frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
                             try:
                                 self.http_session.post(
-                                    f"http://localhost:{self.port}/api/camera/{cam_id}/frame",
+                                    f"http://127.0.0.1:{self.port}/api/camera/{cam_id}/frame",
                                     data=jpeg.tobytes(),
                                     headers={'Content-Type': 'image/jpeg'},
                                     timeout=0.25
@@ -1148,7 +1148,7 @@ class TollAIEngine:
                 cams_csv = ",".join(map(str, active_cams))
                 try:
                     self.http_session.post(
-                        f"http://localhost:{self.port}/api/cameras/broadcast_frame",
+                        f"http://127.0.0.1:{self.port}/api/cameras/broadcast_frame",
                         data=jpeg_bytes,
                         headers={
                             'Content-Type': 'image/jpeg',
