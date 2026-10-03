@@ -41,6 +41,7 @@ If you don't have a Windows PC setup right now:
 ---
 
 ## 📁 Key Files Created
+- [start_windows.bat](file:///Users/rsmmonaem/Desktop/Nibiz%20TEMP/tole/start_windows.bat): 1-click Windows runner that auto-detects TollAI_Monitor.exe or auto-installs dependencies and runs on http://localhost:5001.
 - [app_launcher.py](file:///Users/rsmmonaem/Desktop/Nibiz%20TEMP/tole/app_launcher.py): Unified launcher handling server start, SQLite persistence, and auto-browser popup.
 - [TollAI.spec](file:///Users/rsmmonaem/Desktop/Nibiz%20TEMP/tole/TollAI.spec): PyInstaller bundle configuration for bundling assets, HTML, models, and Python modules.
 - [build_windows_exe.bat](file:///Users/rsmmonaem/Desktop/Nibiz%20TEMP/tole/build_windows_exe.bat): 1-click Windows batch builder script.

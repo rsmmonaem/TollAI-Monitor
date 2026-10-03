@@ -29,3 +29,10 @@ Archive.zip
 
 # Ignore training outputs
 runs/
+
+# PyInstaller build artifacts and standalone binaries
+dist/
+build/
+build_venv/
+*.exe
+
