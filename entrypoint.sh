@@ -12,15 +12,27 @@ fi
 
 export PYTHONPATH="${PYTHONPATH:-}:$(pwd)/python:$(pwd)"
 
-echo "Cleaning up old AI Engine processes..."
+echo "Cleaning up old AI Engine and Server processes..."
 if command -v pkill >/dev/null 2>&1; then
     pkill -f "python/ai_engine.py" 2>/dev/null || true
+    pkill -f "python/server.py" 2>/dev/null || true
 fi
 
 # 1. Start the Flask server in the background
 # Default PORT to 7860 (Hugging Face) or 5002 locally
 export PORT=${PORT:-7860}
 export ACTIVE_CAMERAS=${ACTIVE_CAMERAS:-"1,2"}
+
+# Release port if still occupied by any stale process
+if command -v lsof >/dev/null 2>&1; then
+    OLD_PORT_PIDS=$(lsof -ti :$PORT 2>/dev/null || true)
+    if [ -n "$OLD_PORT_PIDS" ]; then
+        echo "Releasing port $PORT (PIDs: $OLD_PORT_PIDS)..."
+        kill -9 $OLD_PORT_PIDS 2>/dev/null || true
+        sleep 1
+    fi
+fi
+
 echo "Starting Flask web server on port $PORT..."
 $PYTHON_BIN python/server.py &
 SERVER_PID=$!
