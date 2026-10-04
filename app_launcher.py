@@ -143,15 +143,29 @@ def run_ai_engine():
 
         import ai_engine
         
-        # 2. Locate model: prefer best.pt, then yolov8n.pt
-        model_sample = os.path.join(APP_DIR, 'best.pt')
-        if not os.path.exists(model_sample):
-            model_sample = os.path.join(BUNDLE_DIR, 'best.pt')
-        if not os.path.exists(model_sample):
-            model_sample = os.path.join(APP_DIR, 'yolov8n.pt')
-        if not os.path.exists(model_sample):
-            model_sample = os.path.join(BUNDLE_DIR, 'yolov8n.pt')
-        if not os.path.exists(model_sample):
+        # 2. Locate model: strictly prioritize custom best.pt
+        model_sample = None
+        for candidate in [
+            os.path.join(APP_DIR, 'best.pt'),
+            os.path.join(BUNDLE_DIR, 'best.pt'),
+            os.path.join(BUNDLE_DIR, 'python', 'best.pt'),
+            'best.pt'
+        ]:
+            if os.path.exists(candidate):
+                model_sample = candidate
+                break
+
+        if not model_sample:
+            for candidate in [
+                os.path.join(APP_DIR, 'yolov8n.pt'),
+                os.path.join(BUNDLE_DIR, 'yolov8n.pt'),
+                'yolov8n.pt'
+            ]:
+                if os.path.exists(candidate):
+                    model_sample = candidate
+                    break
+
+        if not model_sample:
             model_sample = 'best.pt'
 
         logger.info(f"AI Engine model: {model_sample}")

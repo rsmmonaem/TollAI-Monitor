@@ -10,6 +10,7 @@ extra_datas = [
     ('index.html', '.'),
     ('assets', 'assets'),
     ('python', 'python'),
+    ('best.pt', '.'),
     ('yolov8n.pt', '.'),
     ('traffic.mp4', '.'),
 ]
@@ -19,8 +20,8 @@ for src, dst in list(extra_datas):
     if not os.path.exists(src):
         extra_datas.remove((src, dst))
 
-if os.path.exists('best.pt'):
-    extra_datas.append(('best.pt', '.'))
+if os.path.exists('python/best.pt'):
+    extra_datas.append(('python/best.pt', 'python'))
 
 # Collect ultralytics data files (default.yaml, bytetrack.yaml, etc.)
 try:
