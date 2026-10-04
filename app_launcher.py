@@ -40,9 +40,18 @@ if python_code_dir not in sys.path:
 if BUNDLE_DIR not in sys.path:
     sys.path.insert(0, BUNDLE_DIR)
 
-# Force SQLite database to persist in APP_DIR (next to the .exe)
-os.environ['SQLITE_DB_PATH'] = os.path.join(APP_DIR, 'toll_monitoring.db')
-os.environ['PERSISTENT_DATA_DIR'] = APP_DIR
+# Check if running directly inside a temporary archive directory (WinRAR, 7-Zip, Temp)
+is_temp_archive = any(t in APP_DIR.lower() for t in ['appdata\\local\\temp', 'temp\\rar$', 'temp\\7z', 'temp\\wz', 'rartemp'])
+if is_temp_archive:
+    # Use persistent AppData location so database and captured images are never deleted by WinRAR
+    DATA_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'TollAI_Monitor')
+    os.makedirs(DATA_DIR, exist_ok=True)
+else:
+    DATA_DIR = APP_DIR
+
+# Force SQLite database to persist
+os.environ['SQLITE_DB_PATH'] = os.path.join(DATA_DIR, 'toll_monitoring.db')
+os.environ['PERSISTENT_DATA_DIR'] = DATA_DIR
 
 # Set port (default 7860 to match standard TollAI deployment or find free port)
 PORT = int(os.environ.get('PORT', 7860))
@@ -177,6 +186,8 @@ if __name__ == '__main__':
     print("=" * 65)
     print(f"[*] Starting system on local computer...")
     print(f"[*] Database: SQLite ({os.environ['SQLITE_DB_PATH']})")
+    if is_temp_archive:
+        print(f"[*] Storage Note: Running inside archive. Persistent database saved to LocalAppData.")
     print(f"[*] Web Interface: http://localhost:{PORT}")
     print("=" * 65)
 

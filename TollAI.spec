@@ -50,6 +50,11 @@ hidden_imports = [
     'multiprocessing',
 ]
 
+try:
+    hidden_imports += collect_submodules('ultralytics')
+except Exception:
+    pass
+
 a = Analysis(
     ['app_launcher.py'],
     pathex=['.', 'python'],
@@ -63,11 +68,6 @@ a = Analysis(
         'tkinter',
         'matplotlib',
         'tensorboard',
-        'torch.utils.tensorboard',
-        'torch.distributed',
-        'torch.testing',
-        'sympy',
-        'ninja',
         'IPython',
         'jupyter',
         'notebook',

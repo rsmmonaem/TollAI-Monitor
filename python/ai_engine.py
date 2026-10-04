@@ -46,6 +46,7 @@ from pathlib import Path
 AI_AVAILABLE = False
 torch = None
 YOLO = None
+ai_import_error = None
 
 try:
     import torch
@@ -57,6 +58,7 @@ try:
     from ultralytics import YOLO
     AI_AVAILABLE = True
 except Exception as e:
+    ai_import_error = e
     logging.getLogger('AIEngine').warning(f"PyTorch/YOLO not available ({e}). AI engine will run in mock/standby mode.")
 
 # ─────────────────────────────────────────────────────────────
@@ -451,6 +453,9 @@ class TollAIEngine:
         self.running = True
 
         # Load YOLO model
+        if not AI_AVAILABLE or YOLO is None:
+            raise RuntimeError(f"PyTorch/YOLO could not be loaded: {ai_import_error}")
+
         logger.info(f"Loading YOLO model: {model_path}")
         self.model = YOLO(model_path)
 
