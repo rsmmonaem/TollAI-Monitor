@@ -148,7 +148,20 @@ def serve_captured_vehicles(filename):
     target = os.path.join(data_dir, 'captured_vehicles')
     if not os.path.exists(target):
         target = os.path.join(ROOT_DIR, 'captured_vehicles')
+    full_path = os.path.join(target, filename)
+    if not os.path.exists(full_path):
+        placeholder_path = os.path.join(ROOT_DIR, 'assets', 'img', 'vehicles', 'toll_plaza.png')
+        if os.path.exists(placeholder_path):
+            return send_file(placeholder_path, mimetype='image/png')
+        return Response(get_placeholder_bytes(), mimetype='image/jpeg')
     return send_from_directory(target, filename)
+
+@app.route('/favicon.ico')
+def favicon():
+    fav = os.path.join(ROOT_DIR, 'assets', 'favicon.ico')
+    if os.path.exists(fav):
+        return send_file(fav)
+    return ('', 204)
 
 # ─────────────────────────────────────────────────────────────
 # LIVE CAMERA VIDEO STREAMING & 14-CHANNEL NVR PROXY
