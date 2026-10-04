@@ -48,6 +48,27 @@ torch = None
 YOLO = None
 ai_import_error = None
 
+# Safe torchvision NMS shim for PyInstaller on Windows
+try:
+    import torchvision
+    import torch
+    _b = torch.zeros((1, 4))
+    _s = torch.zeros((1,))
+    torchvision.ops.nms(_b, _s, 0.5)
+except Exception:
+    import types
+    try:
+        from ultralytics.utils.nms import TorchNMS
+        tv_mock = types.ModuleType('torchvision')
+        tv_ops = types.ModuleType('torchvision.ops')
+        tv_ops.nms = TorchNMS.nms
+        tv_mock.ops = tv_ops
+        import sys
+        sys.modules['torchvision'] = tv_mock
+        sys.modules['torchvision.ops'] = tv_ops
+    except Exception:
+        pass
+
 try:
     import torch
     try:

@@ -23,7 +23,7 @@ import requests
 from requests.auth import HTTPDigestAuth
 from requests.adapters import HTTPAdapter
 from concurrent.futures import ThreadPoolExecutor
-from flask import Flask, jsonify, request, send_from_directory, Response
+from flask import Flask, jsonify, request, send_from_directory, Response, send_file
 from flask_cors import CORS
 
 import cv2
