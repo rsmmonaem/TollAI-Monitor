@@ -42,6 +42,8 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+ROOT_DIR = Path(__file__).resolve().parent.parent
+
 # Safe AI imports (handles environments where PyTorch C++ DLLs or dependencies are missing)
 AI_AVAILABLE = False
 torch = None
@@ -316,7 +318,7 @@ def clean_plate_text(raw_text: str) -> str:
 # VEHICLE CLASSIFICATION
 # ─────────────────────────────────────────────────────────────
 
-def classify_vehicle(yolo_class_name: str, yolo_class_id: int, bbox: list = None) -> str:
+def classify_vehicle(yolo_class_name: str, yolo_class_id: int = -1, bbox: list = None) -> str:
     """Map YOLO detection to the 9 Bangladeshi toll categories:
     1. Bike (৳5)
     2. CNG (৳10)
@@ -328,63 +330,43 @@ def classify_vehicle(yolo_class_name: str, yolo_class_id: int, bbox: list = None
     8. Truck (৳50)
     9. Lorry (৳60)
     """
-    name_lower = yolo_class_name.lower()
+    name_clean = str(yolo_class_name).strip().lower()
 
-    # Calculate bounding box geometric features
-    w = max(1.0, bbox[2] - bbox[0]) if bbox is not None else 100.0
-    h = max(1.0, bbox[3] - bbox[1]) if bbox is not None else 100.0
-    area = w * h
-    ratio = w / h
+    # 1. Direct custom class dictionary match
+    if name_clean in CUSTOM_CLASS_MAP:
+        return CUSTOM_CLASS_MAP[name_clean]
 
-    # 1. High-priority explicit custom model class labels (fine-tuned BD models)
-    for specific_key in ('cng', 'auto-rickshaw', 'easybike', 'auto', 'pickup', 'covered-van', 'covered van', 'lorry'):
-        if specific_key in name_lower:
-            return CUSTOM_CLASS_MAP.get(specific_key, specific_key.title())
+    # 2. Key phrases in name
+    if any(k in name_clean for k in ('motorbike', 'motorcycle', 'scooter', 'bicycle', 'bike')):
+        return 'Bike'
+    if any(k in name_clean for k in ('cng', 'three wheeler', 'three-wheeler')):
+        return 'CNG'
+    if any(k in name_clean for k in ('auto rickshaw', 'auto-rickshaw', 'easybike', 'rickshaw', 'auto', 'wheelbarrow')):
+        return 'Auto'
+    if any(k in name_clean for k in ('bus', 'minibus')):
+        return 'Bus'
+    if any(k in name_clean for k in ('pickup', 'human hauler')):
+        return 'Pickup'
+    if any(k in name_clean for k in ('lorry', 'trailer', 'prime mover')):
+        return 'Lorry'
+    if any(k in name_clean for k in ('truck', 'army vehicle')):
+        return 'Truck'
+    if any(k in name_clean for k in ('van', 'covered-van', 'covered van', 'garbagevan')):
+        return 'Covered Van'
+    if any(k in name_clean for k in ('car', 'suv', 'taxi', 'policecar', 'ambulance', 'minivan', 'jeep', 'microbus')):
+        return 'Car'
 
-    # 2. Bike / Motorcycle (slender width < 70 or compact area < 8500):
-    if yolo_class_id == 3 or 'motorcycle' in name_lower or 'bike' in name_lower:
+    # 3. Geometric fallback if generic
+    if bbox is not None:
+        w = max(1.0, bbox[2] - bbox[0])
+        h = max(1.0, bbox[3] - bbox[1])
+        area = w * h
+        if area > 65000:
+            return 'Lorry'
         if w < 70 or area < 8500:
             return 'Bike'
 
-    # 3. Three-Wheelers (CNG / Auto-Rickshaw / Easybike):
-    # Distinct cabin width >= 70, tall profile ratio < 0.82
-    if yolo_class_id in (2, 3) or 'car' in name_lower or 'motorcycle' in name_lower:
-        if ratio < 0.82 and h > 75 and w >= 65:
-            return 'CNG'
-        # Battery-run easybike / auto-rickshaw (moderately boxy, medium height)
-        if 0.82 <= ratio <= 1.05 and 75 < h < 175 and area < 30000 and w >= 65:
-            return 'Auto'
-
-    # 4. Commercial Trucks, Pickups, Covered Vans, and Lorries:
-    if yolo_class_id == 7 or 'truck' in name_lower:
-        # Lorry: Multi-axle prime mover, long fuel/gas tanker, or large trailer
-        if area > 65000 or w > 280 or (ratio > 1.55 and area > 42000):
-            return 'Lorry'
-        # Pickup: Small utility truck / human hauler / mini pickup
-        elif area < 32000 or (h < 165 and w < 190):
-            return 'Pickup'
-        # Covered Van: Medium enclosed cargo box van
-        elif 32000 <= area <= 65000 and 0.80 <= ratio <= 1.35:
-            return 'Covered Van'
-        else:
-            return 'Truck'
-
-    # 5. Bus:
-    if yolo_class_id == 5 or 'bus' in name_lower:
-        return 'Bus'
-
-    # 6. Bike / Motorcycle fallback:
-    if yolo_class_id == 3 or 'motorcycle' in name_lower:
-        return 'Bike'
-
-    # 7. Car / Microbus / SUV / Covered Van:
-    if yolo_class_id == 2 or 'car' in name_lower:
-        # Check if it's a delivery van detected as car
-        if area > 45000 and h > 185 and ratio < 1.25:
-            return 'Covered Van'
-        return 'Car'
-
-    return VEHICLE_CLASS_IDS.get(yolo_class_id, 'Unknown')
+    return VEHICLE_CLASS_IDS.get(yolo_class_id, 'Car')
 
 
 # ─────────────────────────────────────────────────────────────
@@ -426,7 +408,7 @@ def draw_detection(frame, bbox, vehicle_type: str, plate: str, confidence: float
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
 
-def draw_hud(frame, fps: float, total_today: int, total_revenue: int):
+def draw_hud(frame, fps: float, total_today: int, total_revenue: int, is_paused: bool = False):
     """Draw heads-up display overlay on frame."""
     h, w = frame.shape[:2]
 
@@ -435,12 +417,14 @@ def draw_hud(frame, fps: float, total_today: int, total_revenue: int):
     cv2.rectangle(overlay, (0, 0), (w, 50), (15, 20, 35), -1)
     cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
 
-    cv2.putText(frame, f"AI TOLL MONITORING | CAM-{CAMERA_ID} | FPS: {fps:.1f}",
-                (10, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 255), 1)
+    status_tag = "[PAUSED]" if is_paused else "[ACTIVE]"
+    status_color = (0, 165, 255) if is_paused else (100, 255, 100)
+    cv2.putText(frame, f"AI TOLL {status_tag} | FPS: {fps:.1f}",
+                (10, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.52, status_color, 1)
 
     ts = datetime.now().strftime('%Y-%m-%d  %H:%M:%S')
     cv2.putText(frame, ts, (10, 38),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (150, 200, 150), 1)
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 200, 180), 1)
 
     # Stats on right
     stats = f"Today: {total_today}  Revenue: {total_revenue:,} Tk"
@@ -448,10 +432,11 @@ def draw_hud(frame, fps: float, total_today: int, total_revenue: int):
     cv2.putText(frame, stats, (w - sw - 10, 18),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.48, (100, 255, 150), 1)
 
-    # Recording indicator
-    cv2.circle(frame, (w - 15, 38), 5, (0, 0, 255), -1)
-    cv2.putText(frame, "REC", (w - 50, 42),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 255), 1)
+    # Status indicator dot
+    dot_color = (0, 165, 255) if is_paused else (0, 0, 255)
+    cv2.circle(frame, (w - 15, 38), 5, dot_color, -1)
+    cv2.putText(frame, "PAUSE" if is_paused else "LIVE", (w - 55, 42),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.38, dot_color, 1)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -511,13 +496,35 @@ class TollAIEngine:
             load_db_toll_rates(self.conn)
 
         # State
+        self.ai_enabled = True                        # Master AI detection switch
+        self.cam_trackers = {}                        # Independent ByteTrack instance per camera
+        self.captured_tracks = set()                  # Set of 'c{cam_id}_t{track_id}' already counted
         self.plate_last_seen: dict[str, float] = {}   # plate_text -> last insert timestamp
         self.plate_last_bbox: dict[str, list] = {}    # plate_text -> last bbox [x1,y1,x2,y2]
         self.spatial_last_seen: dict[str, float] = {} # spatial_cell_key -> last insert timestamp
-        self.plate_cache: dict[int, tuple[str, float]] = {}  # track_id -> (plate_text, conf)
+        self.plate_cache: dict[str, tuple[str, float]] = {}  # cache_key -> (plate_text, conf)
         self.recent_records: list[dict] = []  # list of {'camera_id': int, 'bbox': list, 'plate': str, 'time': float}
         self.total_today = 0
         self.total_revenue = 0
+
+        # Load today's existing baseline statistics from database
+        try:
+            if self.conn:
+                cursor = self.conn.cursor(dictionary=True)
+                cursor.execute("""
+                    SELECT COUNT(*) as cnt, COALESCE(SUM(toll_amount), 0) as rev
+                    FROM vehicle_detections
+                    WHERE DATE(entry_time) = CURDATE()
+                """)
+                row = cursor.fetchone()
+                if row:
+                    self.total_today = int(row.get('cnt') or 0)
+                    self.total_revenue = int(row.get('rev') or 0)
+                cursor.close()
+                logger.info(f"Loaded today's existing records: {self.total_today} vehicles, ৳{self.total_revenue} revenue")
+        except Exception as e:
+            logger.warning(f"Could not load baseline stats: {e}")
+
         self.fps_counter = 0
         self.fps_start = time.time()
         self.current_fps = 0.0
@@ -536,23 +543,32 @@ class TollAIEngine:
         self.http_session = requests.Session()
 
     def _sync_cameras_worker(self):
-        """Polls Flask /api/ai/cameras every 3 seconds to dynamically sync selected cameras from UI."""
+        """Polls Flask /api/ai/control and /api/ai/cameras dynamically to sync state from UI."""
         while self.running:
             try:
+                # 1. Sync Master AI detection switch
+                ctrl_url = f"http://127.0.0.1:{self.port}/api/ai/control"
+                req_ctrl = urllib.request.Request(ctrl_url)
+                with urllib.request.urlopen(req_ctrl, timeout=1.0) as res:
+                    if res.status == 200:
+                        ctrl_data = json.loads(res.read().decode())
+                        self.ai_enabled = ctrl_data.get('ai_enabled', True)
+
+                # 2. Sync active cameras
                 url = f"http://127.0.0.1:{self.port}/api/ai/cameras"
                 req = urllib.request.Request(url)
                 with urllib.request.urlopen(req, timeout=1.0) as res:
                     if res.status == 200:
                         data = json.loads(res.read().decode())
                         active = data.get('active_cameras')
-                        if active and isinstance(active, list):
+                        if isinstance(active, list):
                             new_cams = set(int(x) for x in active if 1 <= int(x) <= len(NVR_CHANNELS))
-                            if new_cams and new_cams != self.camera_ids:
+                            if new_cams != self.camera_ids:
                                 logger.info(f"🔄 AI Engine active cameras dynamically updated: {sorted(list(new_cams))}")
                                 self.camera_ids = new_cams
             except Exception:
                 pass
-            time.sleep(3.0)
+            time.sleep(2.0)
 
     def _db_worker(self):
         """Asynchronously writes captured vehicle images to disk and logs records to database with auto-reconnect."""
@@ -598,28 +614,32 @@ class TollAIEngine:
                 self.db_queue.task_done()
 
     def _spatial_key(self, bbox: list, camera_id: int = 1, frame_w: int = 640, frame_h: int = 360) -> str:
-        """Map a bounding box to a spatial grid cell key to identify stationary vehicles."""
-        cx = (bbox[0] + bbox[2]) / 2  # center x
-        cy = (bbox[1] + bbox[3]) / 2  # center y
+        """Map a bounding box to a spatial grid cell key."""
+        cx = (bbox[0] + bbox[2]) / 2
+        cy = (bbox[1] + bbox[3]) / 2
         cell_x = int(cx / frame_w * SPATIAL_GRID_CELLS)
         cell_y = int(cy / frame_h * SPATIAL_GRID_CELLS)
         return f"cam{camera_id}_cell_{cell_x}_{cell_y}"
 
-    def _is_duplicate(self, plate: str, bbox: list, camera_id: int = 1) -> bool:
-        """Multi-layer deduplication:
-        1. Parked / Stationary Vehicle Filter (IoU > 0.35 or Center Dist < 65px):
-           If any vehicle in this camera is in the same physical spot, it is a standing vehicle.
-           Refreshes timer and returns True (DUPLICATE) so parked cars are NEVER inserted repeatedly.
-        2. Global Plate Cooldown: If the same license plate was detected on ANY camera
-           within PLATE_COOLDOWN (60s), reject duplicate.
-        3. Persistent DB Cooldown: Catches restarts.
+    def _is_duplicate(self, track_id, bbox: list, camera_id: int = 1) -> bool:
+        """Accurate deduplication:
+        1. If vehicle has ByteTrack track_id: check if track_id was already captured.
+        2. If track_id is None: check if vehicle in the same camera view has IoU > 0.60
+           within the last 3.5 seconds (prevents counting stationary car repeatedly).
         """
         now = time.time()
 
-        # Clean up records older than 300 seconds
-        self.recent_records = [r for r in self.recent_records if now - r['time'] < 300]
+        if track_id is not None:
+            track_key = f"c{camera_id}_t{track_id}"
+            if track_key in self.captured_tracks:
+                return True
+            self.captured_tracks.add(track_key)
+            if len(self.captured_tracks) > 5000:
+                self.captured_tracks.clear()
+            return False
 
-        # 1. Stationary Vehicle Check in the same camera view
+        # Untracked fallback
+        self.recent_records = [r for r in self.recent_records if now - r['time'] < 3.5]
         for rec in self.recent_records:
             if rec['camera_id'] == camera_id:
                 b1, b2 = rec['bbox'], bbox
@@ -628,67 +648,35 @@ class TollAIEngine:
                 xB = min(b1[2], b2[2])
                 yB = min(b1[3], b2[3])
                 inter = max(0.0, xB - xA) * max(0.0, yB - yA)
-                area1 = max(1.0, (b1[2] - b1[0]) * (b1[3] - b1[1]))
-                area2 = max(1.0, (b2[2] - b2[0]) * (b2[3] - b2[1]))
-                iou = inter / float(area1 + area2 - inter)
-
-                c1x, c1y = (b1[0] + b1[2]) / 2.0, (b1[1] + b1[3]) / 2.0
-                c2x, c2y = (b2[0] + b2[2]) / 2.0, (b2[1] + b2[3]) / 2.0
-                dist = math.hypot(c1x - c2x, c1y - c2y)
-
-                if iou > 0.35 or dist < 65:
-                    # Vehicle is still parked or queued at the same spot!
+                a1 = max(1.0, (b1[2] - b1[0]) * (b1[3] - b1[1]))
+                a2 = max(1.0, (b2[2] - b2[0]) * (b2[3] - b2[1]))
+                iou = inter / float(a1 + a2 - inter)
+                if iou > 0.60:
                     rec['time'] = now
-                    rec['bbox'] = bbox
                     return True
 
-        # 2. Known plate cooldown across all cameras
-        if plate and not plate.startswith('UNKNOWN'):
-            for rec in self.recent_records:
-                if rec['plate'] == plate and (now - rec['time'] < PLATE_COOLDOWN):
-                    return True
-            if self._db_dedup_check(plate, PLATE_COOLDOWN):
-                return True
-
-        # 3. New unique vehicle detection! Record it
         self.recent_records.append({
             'camera_id': camera_id,
             'bbox': bbox,
-            'plate': plate,
             'time': now
         })
         return False
 
-    def _db_dedup_check(self, plate: str, cooldown_seconds: int) -> bool:
-        """Persistent DB-backed duplicate check.
-        Returns True (duplicate) if same plate was inserted within cooldown_seconds.
-        Falls back gracefully if DB unavailable.
-        """
-        if not self.conn or plate.startswith('UNKNOWN-Z'):
-            return False
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM vehicle_detections
-                WHERE plate_number = %s
-                  AND entry_time >= NOW() - INTERVAL %s SECOND
-            """, (plate, cooldown_seconds))
-            row = cursor.fetchone()
-            cursor.close()
-            return bool(row and row[0] > 0)
-        except Exception:
-            return False  # fail open — let in-memory dedup handle it
-
     def _save_image(self, frame: np.ndarray, vehicle_type: str, plate: str, camera_id: int) -> str:
-        """Save the captured vehicle frame to disk."""
+        """Save the captured vehicle frame to disk and return web-ready relative path."""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:19]
         safe_plate = re.sub(r'[^\w]', '_', plate) if plate else 'unknown'
         filename = f"{vehicle_type}_{safe_plate}_{timestamp}_CAM{camera_id}.jpg"
-        path = OUTPUT_DIR / filename
-        cv2.imwrite(str(path), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        return str(path)
 
-    def _async_ocr_task(self, cache_key, plate_roi, vehicle_type, camera_id, conf, toll, bbox, full_frame):
+        data_dir = os.environ.get('PERSISTENT_DATA_DIR', str(ROOT_DIR))
+        out_folder = Path(data_dir) / 'captured_vehicles'
+        out_folder.mkdir(parents=True, exist_ok=True)
+
+        path = out_folder / filename
+        cv2.imwrite(str(path), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        return f"captured_vehicles/{filename}"
+
+    def _async_ocr_task(self, cache_key, plate_roi, vehicle_type, camera_id, conf, toll, bbox, full_frame, track_id=None):
         """Asynchronous OCR worker running in background thread pool."""
         plate_text = ""
         plate_conf = 0.0
@@ -705,35 +693,51 @@ class TollAIEngine:
             logger.debug(f"Async OCR error: {e}")
         finally:
             if not plate_text:
-                if isinstance(cache_key, int):
-                    plate_text = f"UNKNOWN-T{cache_key}"
+                if track_id is not None:
+                    plate_text = f"BD-CAM{camera_id}-T{track_id}"
                 else:
-                    plate_text = f"UNKNOWN-P{abs(hash(cache_key)) % 10000}"
+                    plate_text = f"BD-CAM{camera_id}-P{int(time.time()) % 10000}"
 
             self.plate_cache[cache_key] = (plate_text, plate_conf)
             self.ocr_pending.discard(cache_key)
 
             # Check deduplication and queue DB insert
-            if not self._is_duplicate(plate_text, bbox, camera_id):
+            if not self._is_duplicate(track_id, bbox, camera_id):
                 status = 'verified' if conf > 0.75 else 'manual_check'
                 try:
                     self.db_queue.put_nowait((full_frame, vehicle_type, plate_text, camera_id, conf, toll, plate_conf, status))
                     self.total_today += 1
                     self.total_revenue += toll
+                    logger.info(f"🚗 CAPTURED: {vehicle_type:10} | Plate: {plate_text:18} | Cam {camera_id} | Total: {self.total_today} | Rev: ৳{self.total_revenue}")
                 except queue.Full:
                     pass
 
+    def _track_camera_frame(self, frame: np.ndarray, camera_id: int):
+        """Ensures each camera maintains its own independent ByteTrack tracker state."""
+        if hasattr(self.model, 'predictor') and self.model.predictor and camera_id in self.cam_trackers:
+            self.model.predictor.trackers = [self.cam_trackers[camera_id]]
+
+        results = self.model.track(
+            frame,
+            conf=YOLO_CONF_THRESHOLD,
+            persist=True,
+            verbose=False,
+            imgsz=480,
+            tracker="bytetrack.yaml"
+        )[0]
+
+        if hasattr(self.model, 'predictor') and self.model.predictor and getattr(self.model.predictor, 'trackers', None):
+            self.cam_trackers[camera_id] = self.model.predictor.trackers[0]
+
+        return results
+
     def _process_frame(self, frame: np.ndarray, camera_id: int):
         """Run YOLO tracking + ultra-fast non-blocking OCR pipeline on a single frame."""
+        if not getattr(self, 'ai_enabled', True):
+            return frame
+
         with torch.inference_mode():
-            results = self.model.track(
-                frame,
-                conf=YOLO_CONF_THRESHOLD,
-                persist=True,
-                verbose=False,
-                imgsz=480,
-                tracker="bytetrack.yaml"
-            )[0]
+            results = self._track_camera_frame(frame, camera_id)
 
         # 1. Extract all valid vehicle detections
         raw_dets = []
@@ -744,8 +748,6 @@ class TollAIEngine:
             bbox     = det.xyxy[0].tolist()
 
             vehicle_type = classify_vehicle(cls_name, cls_id, bbox)
-            if vehicle_type == 'Unknown':
-                continue  # Skip non-vehicle detections
 
             track_id = int(det.id[0]) if det.id is not None else None
             raw_dets.append({
@@ -753,7 +755,7 @@ class TollAIEngine:
                 'bbox': bbox, 'vehicle_type': vehicle_type, 'track_id': track_id
             })
 
-        # 2. Suppress duplicate overlapping boxes (e.g. car + motorcycle overlapping on same CNG)
+        # 2. Suppress duplicate overlapping boxes
         kept_dets = []
         for d in sorted(raw_dets, key=lambda x: x['conf'], reverse=True):
             overlap = False
@@ -779,7 +781,7 @@ class TollAIEngine:
             conf = det['conf']
             track_id = det['track_id']
 
-            cache_key = f"c{camera_id}_t{track_id}" if track_id is not None else self._spatial_key(bbox, camera_id)
+            cache_key = f"c{camera_id}_t{track_id}" if track_id is not None else f"c{camera_id}_{int(bbox[0])}_{int(bbox[1])}"
 
             if cache_key in self.plate_cache:
                 plate_text, plate_conf = self.plate_cache[cache_key]
@@ -787,28 +789,25 @@ class TollAIEngine:
                 plate_text = f"T{track_id}" if track_id is not None else "DETECTING..."
                 plate_conf = 0.0
 
-                # Queue OCR job in background thread pool once per vehicle
+                # Queue capture + OCR job in background thread pool once per vehicle
                 if cache_key not in self.ocr_pending:
                     self.ocr_pending.add(cache_key)
                     plate_roi = extract_plate_region(frame, bbox)
-                    if plate_roi is not None and plate_roi.size > 0:
-                        self.ocr_executor.submit(
-                            self._async_ocr_task,
-                            cache_key,
-                            plate_roi.copy(),
-                            vehicle_type,
-                            camera_id,
-                            conf,
-                            TOLL_RATES.get(vehicle_type, 0),
-                            bbox,
-                            frame.copy()
-                        )
-                    else:
-                        self.plate_cache[cache_key] = (plate_text, 0.0)
-                        self.ocr_pending.discard(cache_key)
+                    self.ocr_executor.submit(
+                        self._async_ocr_task,
+                        cache_key,
+                        plate_roi.copy() if plate_roi is not None else None,
+                        vehicle_type,
+                        camera_id,
+                        conf,
+                        TOLL_RATES.get(vehicle_type, 20),
+                        bbox,
+                        frame.copy(),
+                        track_id
+                    )
 
             # Draw bounding box and label immediately on frame for zero-latency live visual feedback
-            toll = TOLL_RATES.get(vehicle_type, 0)
+            toll = TOLL_RATES.get(vehicle_type, 20)
             draw_detection(frame, bbox, vehicle_type, plate_text, conf, toll)
 
         return frame
@@ -1104,7 +1103,7 @@ class TollAIEngine:
                                 raw_frame = cv2.resize(raw_frame, (640, 360))
                             with self.model_lock:
                                 proc_frame = self._process_frame(raw_frame, cam_id)
-                            draw_hud(proc_frame, self.current_fps, self.total_today, self.total_revenue)
+                            draw_hud(proc_frame, self.current_fps, self.total_today, self.total_revenue, is_paused=not getattr(self, 'ai_enabled', True))
                             _, jpeg = cv2.imencode('.jpg', proc_frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
                             try:
                                 self.http_session.post(
@@ -1164,7 +1163,7 @@ class TollAIEngine:
                     proc_frame = self._process_frame(frame, active_cams[0])
 
                 # HUD overlay
-                draw_hud(proc_frame, self.current_fps, self.total_today, self.total_revenue)
+                draw_hud(proc_frame, self.current_fps, self.total_today, self.total_revenue, is_paused=not getattr(self, 'ai_enabled', True))
 
                 # Ultra-fast JPEG encode with quality 65 (cuts latency & size in half)
                 _, jpeg = cv2.imencode('.jpg', proc_frame, [cv2.IMWRITE_JPEG_QUALITY, 65])

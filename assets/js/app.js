@@ -693,6 +693,7 @@ const App = (() => {
     startClock();
     initNav();
     initMobileToggle();
+    syncMasterAiStatus();
     startCameraSimulation();
 
     // 3. Dashboard
@@ -915,6 +916,55 @@ const App = (() => {
     toast(`${isNowActive ? '🤖 AI Activated' : '📴 AI Deactivated'} for Camera ${camId}`, isNowActive ? 'success' : 'info');
   }
 
+  async function toggleMasterAi() {
+    try {
+      const resp = await fetch('/api/ai/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle' })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        updateMasterAiUI(data.ai_enabled);
+        toast(`AI Detection ${data.ai_enabled ? 'Started (Live Tracking)' : 'Paused / Stopped'}`, data.ai_enabled ? 'success' : 'warning');
+      }
+    } catch (e) {
+      console.error('Failed to toggle master AI:', e);
+    }
+  }
+
+  function updateMasterAiUI(isEnabled) {
+    const btn = document.getElementById('master-ai-btn');
+    const dot = document.getElementById('master-ai-dot');
+    const text = document.getElementById('master-ai-text');
+    if (!btn || !text || !dot) return;
+    if (isEnabled) {
+      btn.style.background = 'rgba(34, 197, 94, 0.15)';
+      btn.style.color = '#4ade80';
+      btn.style.borderColor = 'rgba(34, 197, 94, 0.35)';
+      dot.style.background = '#22c55e';
+      text.textContent = 'AI: ACTIVE';
+    } else {
+      btn.style.background = 'rgba(239, 68, 68, 0.15)';
+      btn.style.color = '#f87171';
+      btn.style.borderColor = 'rgba(239, 68, 68, 0.35)';
+      dot.style.background = '#ef4444';
+      text.textContent = 'AI: PAUSED';
+    }
+  }
+
+  async function syncMasterAiStatus() {
+    try {
+      const resp = await fetch('/api/ai/control');
+      if (resp.ok) {
+        const data = await resp.json();
+        updateMasterAiUI(data.ai_enabled);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
   return { 
     init, 
     navigateTo, 
@@ -930,7 +980,9 @@ const App = (() => {
     aiSelectPreset,
     onAiCheckboxChange,
     toggleAiCamera,
-    updateAiBadges
+    updateAiBadges,
+    toggleMasterAi,
+    syncMasterAiStatus
   };
 })();
 

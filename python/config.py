@@ -59,20 +59,40 @@ VEHICLE_CLASS_IDS = {
     7:  'Truck',
 }
 
-# Custom class mapping
+# Custom class mapping for fine-tuned Bangladesh models (all 21 classes)
 CUSTOM_CLASS_MAP = {
+    'motorbike':  'Bike',
     'motorcycle': 'Bike',
-    'bike':       'Bike',
+    'scooter':    'Bike',
     'bicycle':    'Bike',
+    'bike':       'Bike',
     'cng':        'CNG',
-    'auto':       'Auto',
+    'three wheelers (cng)': 'CNG',
+    'three wheelers': 'CNG',
+    'auto':          'Auto',
+    'auto rickshaw': 'Auto',
     'auto-rickshaw': 'Auto',
-    'pickup':     'Pickup',
-    'bus':        'Bus',
-    'truck':      'Truck',
-    'lorry':      'Lorry',
-    'covered-van':'Covered Van',
+    'rickshaw':      'Auto',
+    'easybike':      'Auto',
+    'wheelbarrow':   'Auto',
     'car':        'Car',
+    'suv':        'Car',
+    'taxi':       'Car',
+    'policecar':  'Car',
+    'ambulance':  'Car',
+    'minivan':    'Car',
+    'pickup':       'Pickup',
+    'human hauler': 'Pickup',
+    'covered-van': 'Covered Van',
+    'covered van': 'Covered Van',
+    'van':         'Covered Van',
+    'garbagevan':  'Covered Van',
+    'bus':     'Bus',
+    'minibus': 'Bus',
+    'truck':        'Truck',
+    'army vehicle': 'Truck',
+    'lorry':        'Lorry',
+    'trailer':      'Lorry',
 }
 
 # Toll rates (BDT)

@@ -585,6 +585,26 @@ def manage_ai_cameras():
         'total_available': len(NVR_CHANNELS)
     })
 
+ai_detection_enabled = True
+
+@app.route('/api/ai/control', methods=['GET', 'POST'])
+def ai_control():
+    global ai_detection_enabled
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        action = data.get('action')
+        if action == 'start':
+            ai_detection_enabled = True
+        elif action == 'stop':
+            ai_detection_enabled = False
+        elif action == 'toggle':
+            ai_detection_enabled = not ai_detection_enabled
+        logger.info(f"AI Detection Master Switch: {'ACTIVE' if ai_detection_enabled else 'PAUSED'}")
+    return jsonify({
+        'ai_enabled': ai_detection_enabled,
+        'status': 'active' if ai_detection_enabled else 'paused'
+    })
+
 # ─────────────────────────────────────────────────────────────
 # REST API ENDPOINTS
 # ─────────────────────────────────────────────────────────────

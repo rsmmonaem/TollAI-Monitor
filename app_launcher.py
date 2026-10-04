@@ -81,17 +81,12 @@ def ensure_database_ready():
             cursor.execute("SELECT COUNT(*) FROM vehicle_detections")
             row = cursor.fetchone()
             count = row[0] if isinstance(row, tuple) else (row.get('COUNT(*)', 0) if isinstance(row, dict) else 0)
+            if count == 1130:
+                logger.info("Purging 1130 legacy demo records so live system starts with real data only...")
+                cursor.execute("DELETE FROM vehicle_detections")
+                conn.commit()
             cursor.close()
             conn.close()
-
-            if count == 0:
-                logger.info("Initializing SQLite database with starting demo records...")
-                try:
-                    import demo_data_generator
-                    demo_data_generator.main()
-                    logger.info("Database initialized successfully.")
-                except Exception as ex:
-                    logger.warning(f"Could not run demo_data_generator: {ex}")
     except Exception as e:
         logger.warning(f"Database check notice: {e}")
 

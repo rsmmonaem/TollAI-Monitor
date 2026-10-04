@@ -90,7 +90,8 @@ const DetectionTable = (() => {
     const hasImage = d.isBackend && record.image_path;
     let imgHtml = getVehicleSVG(record.vehicle_type);
     if (hasImage) {
-      const cleanPath = record.image_path.startsWith('/') ? record.image_path : '/' + record.image_path;
+      const norm = record.image_path.replace(/\\/g, '/');
+      const cleanPath = norm.startsWith('/') ? norm : '/' + norm;
       imgHtml = `<img src="${cleanPath}" style="width:100%;height:100%;object-fit:cover;display:block;" onerror="this.style.display='none';" />`;
     }
 
@@ -120,6 +121,9 @@ const DetectionTable = (() => {
   function insertRow(record) {
     const tbody = document.getElementById('detection-tbody');
     if (!tbody) return;
+
+    const emptyRow = document.getElementById('empty-detection-row');
+    if (emptyRow) emptyRow.remove();
 
     const rows = tbody.querySelectorAll('tr');
     if (rows.length >= MAX_ROWS) tbody.removeChild(tbody.lastElementChild);
@@ -168,6 +172,11 @@ const DetectionTable = (() => {
     tbody.innerHTML = '';
 
     const initial = window.AppData.getRecentRecords(25);
+    if (!initial || initial.length === 0) {
+      tbody.innerHTML = '<tr id="empty-detection-row"><td colspan="8" class="text-center py-4 text-muted-c" style="font-size:12px;"><i class="bi bi-camera-video me-1"></i> No vehicles captured yet today. Real-time detection active.</td></tr>';
+      maxSeenId = 0;
+      return;
+    }
     initial.forEach(r => {
       const tr = buildRow(r, false);
       tbody.appendChild(tr);
