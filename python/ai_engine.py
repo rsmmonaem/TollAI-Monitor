@@ -16,7 +16,7 @@ import cv2
 try:
     import easyocr
     EASYOCR_AVAILABLE = True
-except ImportError:
+except Exception as e:
     EASYOCR_AVAILABLE = False
     easyocr = None
 import mysql.connector

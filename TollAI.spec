@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
 import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
 block_cipher = None
 
@@ -28,6 +28,16 @@ try:
 except Exception:
     pass
 
+extra_binaries = []
+try:
+    extra_binaries += collect_dynamic_libs('torch')
+except Exception:
+    pass
+try:
+    extra_binaries += collect_dynamic_libs('torchvision')
+except Exception:
+    pass
+
 hidden_imports = [
     'sqlite3',
     'flask',
@@ -45,7 +55,6 @@ hidden_imports = [
     'ai_engine',
     'ultralytics',
     'torch',
-    'torchvision',
     'yaml',
     'multiprocessing',
 ]
@@ -58,7 +67,7 @@ except Exception:
 a = Analysis(
     ['app_launcher.py'],
     pathex=['.', 'python'],
-    binaries=[],
+    binaries=extra_binaries,
     datas=extra_datas,
     hiddenimports=hidden_imports,
     hookspath=[],
