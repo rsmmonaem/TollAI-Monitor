@@ -766,13 +766,13 @@ def get_stats():
                     SUM(CASE WHEN vehicle_type = 'Bus' THEN 1 ELSE 0 END) as buses,
                     SUM(CASE WHEN vehicle_type IN ('Truck', 'Lorry') THEN 1 ELSE 0 END) as trucks
                 FROM vehicle_detections
-                WHERE DATE(entry_time) = CURDATE()
+                WHERE DATE(entry_time) = CURDATE() AND (status IS NULL OR LOWER(status) != 'excluded')
             """
             cursor.execute(query)
             stats = cursor.fetchone()
             
             # Count manual check alerts
-            cursor.execute("SELECT COUNT(*) as fraud_alerts FROM vehicle_detections WHERE DATE(entry_time) = CURDATE() AND status != 'verified'")
+            cursor.execute("SELECT COUNT(*) as fraud_alerts FROM vehicle_detections WHERE DATE(entry_time) = CURDATE() AND status != 'verified' AND status != 'excluded'")
             alert_count = cursor.fetchone()
             
             cursor.close()
@@ -905,8 +905,9 @@ def get_detections():
                     r['entry_time'] = str(r['entry_time'])
                 r['confidence'] = float(r.get('confidence') or 0.0)
                 r['toll_amount'] = float(r.get('toll_amount') or 0.0)
-                if 'status' in r and r['status']:
-                    r['status'] = str(r['status']).replace('_', ' ').title()
+                st = str(r.get('status') or 'verified').lower()
+                r['status'] = st
+                r['is_calculated'] = (st != 'excluded')
                 # Ensure a valid image path fallback if null
                 if not r.get('image_path'):
                     r['image_path'] = None
@@ -927,11 +928,160 @@ def get_detections():
     # Format dates
     formatted = []
     for r in sliced:
+        st = str(r.get('status') or 'verified').lower()
         formatted.append({
             **r,
+            'status': st,
+            'is_calculated': (st != 'excluded'),
             'entry_time': r['entry_time'].isoformat()
         })
     return jsonify(formatted)
+
+@app.route('/api/detections/<int:det_id>/status', methods=['POST'])
+def update_detection_status(det_id):
+    data = request.json or {}
+    new_status = data.get('status')
+    if not new_status:
+        is_calc = data.get('is_calculated')
+        if is_calc is not None:
+            new_status = 'verified' if is_calc else 'excluded'
+        else:
+            return jsonify({'success': False, 'message': 'Missing status'}), 400
+            
+    new_status = str(new_status).lower()
+    if new_status not in ('verified', 'excluded', 'manual_check'):
+        new_status = 'verified'
+        
+    conn = get_db_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE vehicle_detections SET status = %s WHERE id = %s", (new_status, det_id))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            logger.info(f"Updated detection #{det_id} status to '{new_status}'")
+            return jsonify({'success': True, 'id': det_id, 'status': new_status, 'is_calculated': (new_status != 'excluded')})
+        except Exception as e:
+            logger.error(f"Error updating detection status: {e}")
+            if conn: conn.close()
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+    # Fallback in mock_records
+    for r in mock_records:
+        if r.get('id') == det_id:
+            r['status'] = new_status
+            r['is_calculated'] = (new_status != 'excluded')
+            break
+    return jsonify({'success': True, 'id': det_id, 'status': new_status, 'is_calculated': (new_status != 'excluded')})
+
+@app.route('/api/detections/<int:det_id>/update', methods=['POST'])
+def update_detection_record(det_id):
+    data = request.json or {}
+    vehicle_type = data.get('vehicle_type')
+    toll_amount = data.get('toll_amount')
+    plate_number = data.get('plate_number')
+    status = data.get('status')
+
+    if not vehicle_type and toll_amount is None and plate_number is None and status is None:
+        return jsonify({'success': False, 'message': 'No fields provided to update'}), 400
+
+    conn = get_db_connection()
+    if conn:
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM vehicle_detections WHERE id = %s", (det_id,))
+            current = cursor.fetchone()
+            if not current:
+                cursor.close()
+                conn.close()
+                return jsonify({'success': False, 'message': f'Record #{det_id} not found'}), 404
+
+            v_type = vehicle_type if vehicle_type is not None else current['vehicle_type']
+            if toll_amount is not None:
+                t_amt = float(toll_amount)
+            elif vehicle_type is not None and vehicle_type != current['vehicle_type']:
+                t_amt = float(TOLL_RATES.get(v_type, current['toll_amount']))
+            else:
+                t_amt = float(current['toll_amount'])
+
+            p_num = plate_number if plate_number is not None else current['plate_number']
+            st = str(status).lower() if status is not None else current['status']
+
+            cursor.execute("""
+                UPDATE vehicle_detections
+                SET vehicle_type = %s, toll_amount = %s, plate_number = %s, status = %s
+                WHERE id = %s
+            """, (v_type, t_amt, p_num, st, det_id))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            logger.info(f"Updated detection #{det_id}: {v_type}, ৳{t_amt}, plate: {p_num}, status: {st}")
+            return jsonify({
+                'success': True,
+                'id': det_id,
+                'vehicle_type': v_type,
+                'toll_amount': t_amt,
+                'plate_number': p_num,
+                'status': st,
+                'is_calculated': (st != 'excluded')
+            })
+        except Exception as e:
+            logger.error(f"Error updating detection record: {e}")
+            if conn: conn.close()
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+    # Fallback in mock_records
+    for r in mock_records:
+        if r.get('id') == det_id:
+            if vehicle_type is not None: r['vehicle_type'] = vehicle_type
+            if toll_amount is not None: r['toll_amount'] = float(toll_amount)
+            if plate_number is not None: r['plate_number'] = plate_number
+            if status is not None: r['status'] = str(status).lower()
+            return jsonify({'success': True, 'id': det_id, 'record': r})
+    return jsonify({'success': False, 'message': 'Record not found'}), 404
+
+@app.route('/api/detections/bulk_status', methods=['POST'])
+def bulk_update_detection_status():
+    data = request.json or {}
+    ids = data.get('ids', [])
+    new_status = data.get('status', 'verified')
+    new_status = str(new_status).lower()
+    if new_status not in ('verified', 'excluded'):
+        new_status = 'verified'
+
+    if not ids:
+        return jsonify({'success': False, 'message': 'No IDs provided'}), 400
+
+    valid_ids = [int(x) for x in ids if str(x).isdigit()]
+    if not valid_ids:
+        return jsonify({'success': False, 'message': 'Invalid IDs'}), 400
+
+    conn = get_db_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            placeholders = ', '.join(['%s'] * len(valid_ids))
+            query = f"UPDATE vehicle_detections SET status = %s WHERE id IN ({placeholders})"
+            params = [new_status] + valid_ids
+            cursor.execute(query, tuple(params))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            logger.info(f"Bulk updated {len(valid_ids)} detections to status '{new_status}'")
+            return jsonify({'success': True, 'count': len(valid_ids), 'status': new_status})
+        except Exception as e:
+            logger.error(f"Error in bulk status update: {e}")
+            if conn: conn.close()
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+    # Fallback
+    count = 0
+    for r in mock_records:
+        if r.get('id') in valid_ids:
+            r['status'] = new_status
+            count += 1
+    return jsonify({'success': True, 'count': count, 'status': new_status})
 
 @app.route('/api/detections', methods=['DELETE'])
 def delete_detections():
@@ -963,7 +1113,7 @@ def get_chart_distribution():
             query = """
                 SELECT vehicle_type, COUNT(*) as count, COALESCE(SUM(toll_amount), 0) as revenue
                 FROM vehicle_detections
-                WHERE DATE(entry_time) = CURDATE()
+                WHERE DATE(entry_time) = CURDATE() AND (status IS NULL OR LOWER(status) != 'excluded')
                 GROUP BY vehicle_type
             """
             cursor.execute(query)
@@ -989,6 +1139,8 @@ def get_chart_distribution():
         distribution[v_type] = {'count': 0, 'revenue': 0}
         
     for r in mock_records:
+        if str(r.get('status', '')).lower() == 'excluded':
+            continue
         t = r['vehicle_type']
         if t in distribution:
             distribution[t]['count'] += 1
@@ -1005,7 +1157,7 @@ def get_chart_hourly():
             query = """
                 SELECT HOUR(entry_time) as hour, COUNT(*) as count, COALESCE(SUM(toll_amount), 0) as revenue
                 FROM vehicle_detections
-                WHERE DATE(entry_time) = CURDATE()
+                WHERE DATE(entry_time) = CURDATE() AND (status IS NULL OR LOWER(status) != 'excluded')
                 GROUP BY HOUR(entry_time)
                 ORDER BY hour
             """
@@ -1030,6 +1182,8 @@ def get_chart_hourly():
     # Fallback Logic
     hours = [{'hour': i, 'count': 0, 'revenue': 0.0} for i in range(24)]
     for r in mock_records:
+        if str(r.get('status', '')).lower() == 'excluded':
+            continue
         hr = r['entry_time'].hour
         hours[hr]['count'] += 1
         hours[hr]['revenue'] += r['toll_amount']
@@ -1047,7 +1201,7 @@ def get_chart_trend():
             cursor.execute("""
                 SELECT HOUR(entry_time) as hour, COALESCE(SUM(toll_amount), 0) as revenue
                 FROM vehicle_detections
-                WHERE DATE(entry_time) = CURDATE()
+                WHERE DATE(entry_time) = CURDATE() AND (status IS NULL OR LOWER(status) != 'excluded')
                 GROUP BY HOUR(entry_time)
                 ORDER BY hour
             """)
@@ -1057,7 +1211,7 @@ def get_chart_trend():
             cursor.execute("""
                 SELECT HOUR(entry_time) as hour, COALESCE(SUM(toll_amount), 0) as revenue
                 FROM vehicle_detections
-                WHERE DATE(entry_time) = SUBDATE(CURDATE(), 1)
+                WHERE DATE(entry_time) = SUBDATE(CURDATE(), 1) AND (status IS NULL OR LOWER(status) != 'excluded')
                 GROUP BY HOUR(entry_time)
                 ORDER BY hour
             """)
@@ -1411,6 +1565,9 @@ def get_report():
                 where_clauses.append(f"camera_id IN ({cam_ph})")
                 params.extend(selected_camera_ids)
 
+            # 3. Exclude manually unticked/excluded detections
+            where_clauses.append("(status IS NULL OR LOWER(status) != 'excluded')")
+
             where_sql = " AND ".join(where_clauses)
 
             # Query 1: Vehicle summary (filtered by camera)
@@ -1534,9 +1691,10 @@ def get_report():
     elif report_type == 'monthly':
         multiplier = 30
         
-    filtered_records = mock_records
+    valid_mock = [r for r in mock_records if str(r.get('status', '')).lower() != 'excluded']
+    filtered_records = valid_mock
     if selected_camera_ids:
-        filtered_records = [r for r in mock_records if r.get('camera_id') in selected_camera_ids]
+        filtered_records = [r for r in valid_mock if r.get('camera_id') in selected_camera_ids]
         
     daily_stats = {}
     cam_stats = {}

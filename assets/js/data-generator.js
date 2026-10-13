@@ -125,10 +125,13 @@ function calcRevenueSummary(records) {
   });
 
   records.forEach(r => {
-    if (summary[r.vehicle_type]) {
-      summary[r.vehicle_type].count++;
-      summary[r.vehicle_type].revenue += r.toll_amount;
-      total += r.toll_amount;
+    if (r.status !== 'excluded') {
+      const t = r.vehicle_type;
+      const amt = parseFloat(r.toll_amount) || 0;
+      if (!summary[t]) summary[t] = { count: 0, revenue: 0 };
+      summary[t].count++;
+      summary[t].revenue += amt;
+      total += amt;
     }
   });
 
@@ -278,8 +281,15 @@ window.AppData = {
     return this.records.slice(0, n);
   },
 
-  formatCurrency(amount) {
-    return `৳${amount.toLocaleString('en-BD')}`;
+  recalculateTotals() {
+    this.revenue = calcRevenueSummary(this.records);
+    this.hourly = generateHourlyData(this.records.filter(r => r.status !== 'excluded'));
+    if (window.DashboardModule && typeof window.DashboardModule.updateSummaryCards === 'function') {
+      window.DashboardModule.updateSummaryCards();
+    }
+    if (window.App && typeof window.App.updateCameraStats === 'function') {
+      window.App.updateCameraStats();
+    }
   },
 
   VEHICLE_EMOJIS,

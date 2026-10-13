@@ -1007,4 +1007,64 @@ body {
   gap: 8px;
 }
 
+/* ── Detection Table Calculation & Status Styles ── */
+tr.row-excluded {
+  background: rgba(239, 68, 68, 0.05) !important;
+  opacity: 0.65;
+}
+tr.row-excluded .plate-badge {
+  text-decoration: line-through;
+  opacity: 0.75;
+}
+tr.row-excluded .det-toll-amount {
+  text-decoration: line-through;
+  color: var(--text-muted) !important;
+}
+.btn-calc-toggle {
+  cursor: pointer;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.2s ease;
+  user-select: none;
+  text-decoration: none;
+}
+.btn-calc-toggle.included {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.btn-calc-toggle.included:hover {
+  background: rgba(16, 185, 129, 0.25);
+  color: #6ee7b7;
+}
+.btn-calc-toggle.excluded {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.btn-calc-toggle.excluded:hover {
+  background: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+.btn-det-action {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11.5px;
+  transition: all 0.15s ease;
+}
+.btn-det-action:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+}
+
+
 

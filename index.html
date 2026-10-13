@@ -283,14 +283,15 @@
               <table class="detection-table">
                 <thead>
                   <tr>
+                    <th style="width:36px;text-align:center;"><input type="checkbox" class="form-check-input" id="det-select-all" title="Select All for Calculation" onchange="DetectionTable.toggleSelectAll(this.checked)" style="cursor:pointer;"></th>
                     <th>Image</th>
                     <th>Type</th>
                     <th>Number Plate</th>
                     <th>Time</th>
-                    <th>Confidence</th>
                     <th>Camera</th>
                     <th>Amount</th>
-                    <th>Status</th>
+                    <th>Calculation</th>
+                    <th style="text-align:center;">Action</th>
                   </tr>
                 </thead>
                 <tbody id="detection-tbody">
@@ -602,11 +603,21 @@
 
         <!-- Full Detection Table -->
         <div class="glass-card">
-          <div class="card-header-custom">
-            <h6><i class="bi bi-list-check"></i> All Detected Vehicles</h6>
-            <div class="d-flex gap-2 align-items-center">
-              <button class="btn btn-sm btn-outline-danger" onclick="clearDetectionLogs()"><i class="bi bi-trash"></i> Clear All</button>
-              <small style="color:var(--text-muted);font-size:11px;">Auto-refreshing every 2.5s</small>
+          <div class="card-header-custom d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <h6><i class="bi bi-list-check"></i> All Detected Vehicles</h6>
+              <!-- Filter Tabs: All, Included, Excluded -->
+              <div class="btn-group btn-group-sm ms-2" role="group">
+                <button type="button" class="btn btn-outline-light btn-sm active" id="det-filter-all" onclick="DetectionTable.setStatusFilter('all')" style="font-size:11.5px;padding:3px 10px;">All</button>
+                <button type="button" class="btn btn-outline-success btn-sm" id="det-filter-included" onclick="DetectionTable.setStatusFilter('included')" style="font-size:11.5px;padding:3px 10px;"><i class="bi bi-check-circle me-1"></i> Included</button>
+                <button type="button" class="btn btn-outline-warning btn-sm" id="det-filter-excluded" onclick="DetectionTable.setStatusFilter('excluded')" style="font-size:11.5px;padding:3px 10px;"><i class="bi bi-x-circle me-1"></i> Excluded</button>
+              </div>
+            </div>
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+              <button class="btn btn-sm btn-outline-success" onclick="DetectionTable.bulkSetSelected(true)" title="Include selected vehicles in toll calculation" style="font-size:11.5px;padding:3px 10px;"><i class="bi bi-check2-all me-1"></i> Include Selected</button>
+              <button class="btn btn-sm btn-outline-warning" onclick="DetectionTable.bulkSetSelected(false)" title="Exclude selected vehicles from toll calculation" style="font-size:11.5px;padding:3px 10px;"><i class="bi bi-slash-circle me-1"></i> Exclude Selected</button>
+              <button class="btn btn-sm btn-outline-danger" onclick="clearDetectionLogs()" style="font-size:11.5px;padding:3px 10px;"><i class="bi bi-trash"></i> Clear All</button>
+              <small style="color:var(--text-muted);font-size:11px;">Live Sync</small>
               <div style="width:8px;height:8px;border-radius:50%;background:var(--success);animation:pulse-dot 1.5s ease infinite;"></div>
             </div>
           </div>
@@ -615,14 +626,15 @@
               <table class="detection-table">
                 <thead>
                   <tr>
+                    <th style="width:36px;text-align:center;"><input type="checkbox" class="form-check-input" id="det-select-all-full" title="Select All for Calculation" onchange="DetectionTable.toggleSelectAll(this.checked)" style="cursor:pointer;"></th>
                     <th style="width:70px;">Image</th>
                     <th>Type</th>
                     <th>Number Plate</th>
                     <th>Time</th>
-                    <th>Confidence</th>
                     <th>Camera</th>
-                    <th>Toll Rate</th>
-                    <th>Status</th>
+                    <th>Amount</th>
+                    <th>Calculation</th>
+                    <th style="text-align:center;">Action</th>
                   </tr>
                 </thead>
                 <tbody id="detection-tbody-full">
@@ -1205,6 +1217,84 @@
           <button type="button" class="btn btn-secondary py-1 px-3" data-bs-dismiss="modal" style="font-size: 13px; background: rgba(148,163,184,0.15); border: none; color: #e2e8f0;">Cancel</button>
           <button type="button" class="btn btn-success py-1 px-4" onclick="ReportsModule.saveMultiCameraSelection()" style="font-size: 13px; background: #10b981; border: none; font-weight: 600;">
             <i class="bi bi-funnel-fill me-1"></i> Apply Camera Filter
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL: EDIT VEHICLE DETECTION & CALCULATION ── -->
+<div class="modal fade" id="editDetectionModal" tabindex="-1" aria-labelledby="editDetectionModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background: #0f172a; border: 1px solid rgba(148,163,184,0.2); border-radius: 16px; color: #f8fafc; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);">
+      <div class="modal-header" style="border-bottom: 1px solid rgba(148,163,184,0.15); padding: 16px 24px;">
+        <div class="d-flex align-items-center gap-3">
+          <div style="background: rgba(16,185,129,0.18); color: #34d399; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size:20px;">
+            <i class="bi bi-pencil-square"></i>
+          </div>
+          <div>
+            <h5 class="modal-title mb-0" id="editDetectionModalLabel" style="font-weight: 700; font-size: 17px;">Edit Vehicle Detection</h5>
+            <small style="color: #94a3b8; font-size: 12px;">Manual review, toll recalculation & classification override</small>
+          </div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" style="padding: 20px 24px;">
+        <form id="edit-detection-form" onsubmit="event.preventDefault(); DetectionTable.saveEditRecord();">
+          <input type="hidden" id="edit-det-id" value="" />
+
+          <div class="d-flex align-items-center gap-3 p-3 mb-3" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;">
+            <div id="edit-det-img-preview" style="width:72px; height:50px; border-radius:6px; overflow:hidden; background:#1e293b; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.1);">
+            </div>
+            <div>
+              <div style="font-size:12px; color:#94a3b8;">Detection ID: <span id="edit-det-id-display" class="text-white fw-bold">#0</span></div>
+              <div style="font-size:12px; color:#94a3b8;">Camera: <span id="edit-det-cam-display" class="text-info fw-bold">CAM-1</span></div>
+              <div style="font-size:11px; color:#64748b;" id="edit-det-time-display">Time: --:--:--</div>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="font-size:12px;font-weight:600;color:#94a3b8;">Vehicle Type / Class (যানবাহনের ধরন)</label>
+            <select id="edit-det-type" class="form-select form-select-sm" onchange="DetectionTable.onEditTypeChange(this.value)" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="font-size:12px;font-weight:600;color:#94a3b8;">Number Plate (নাম্বার প্লেট)</label>
+            <input type="text" id="edit-det-plate" class="form-control form-control-sm" placeholder="e.g. Dhaka Metro Ga-11-2345" required style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="font-size:12px;font-weight:600;color:#94a3b8;">Toll Amount / Fee (টোল পরিমাণ - ৳)</label>
+            <div class="input-group input-group-sm">
+              <span class="input-group-text" style="background:rgba(255,255,255,0.06);color:#94a3b8;border:1px solid rgba(255,255,255,0.15);">৳</span>
+              <input type="number" id="edit-det-toll" class="form-control form-control-sm" min="0" step="1" required style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+            </div>
+          </div>
+
+          <div class="p-3 mb-1" style="background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); border-radius: 10px;">
+            <label class="form-label mb-2" style="font-size:12px;font-weight:700;color:#93c5fd;">Toll Calculation Status (গণনা স্ট্যাটাস)</label>
+            <div class="form-check form-switch mb-1">
+              <input class="form-check-input" type="checkbox" role="switch" id="edit-det-calc-check" checked style="cursor:pointer; width:38px; height:20px;">
+              <label class="form-check-label ms-2" for="edit-det-calc-check" style="font-size:12.5px; font-weight:600; color:#f1f5f9;">
+                Include in Toll Calculation (টোল হিসাবে গণ্য করুন)
+              </label>
+            </div>
+            <small style="font-size:11px; color:#94a3b8; display:block; margin-left:46px;">
+              টিক চিহ্ন তুলে দিলে এটি টোল রেভিনিউ এবং মোট কাউন্ট থেকে বাদ দেওয়া হবে।
+            </small>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer d-flex justify-content-between align-items-center" style="border-top: 1px solid rgba(148,163,184,0.15); padding: 14px 24px;">
+        <div style="font-size: 11.5px; color: #94a3b8;">
+          <i class="bi bi-arrow-repeat text-success-c me-1"></i> Live totals recalculate immediately
+        </div>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-secondary py-1 px-3" data-bs-dismiss="modal" style="font-size: 13px; background: rgba(148,163,184,0.15); border: none; color: #e2e8f0;">Cancel</button>
+          <button type="button" class="btn btn-success py-1 px-4" onclick="DetectionTable.saveEditRecord()" style="font-size: 13px; background: #10b981; border: none; font-weight: 600;">
+            <i class="bi bi-check-lg me-1"></i> Save Changes
           </button>
         </div>
       </div>
