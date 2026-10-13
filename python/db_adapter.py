@@ -32,6 +32,28 @@ _mysql_last_attempt = 0
 _mysql_retry_interval = 60  # seconds
 _mysql_failure_logged = False
 _sqlite_schema_initialized = False
+_mysql_schema_initialized = False
+
+def _ensure_mysql_tables(conn):
+    global _mysql_schema_initialized
+    if _mysql_schema_initialized:
+        return
+    try:
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS camera_settings (
+                camera_id       INT PRIMARY KEY,
+                name            VARCHAR(255) NOT NULL,
+                lane            VARCHAR(255) NOT NULL,
+                updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """)
+        conn.commit()
+        c.close()
+        _mysql_schema_initialized = True
+    except Exception as e:
+        logger.warning(f"Could not auto-ensure MySQL camera_settings: {e}")
+
 
 # SQLite custom functions for MySQL compatibility
 def _sqlite_subdate(date_val, days):
@@ -313,6 +335,14 @@ def _ensure_sqlite_tables(conn):
                 reason          TEXT DEFAULT NULL
             );
         """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS camera_settings (
+                camera_id       INTEGER PRIMARY KEY,
+                name            TEXT NOT NULL,
+                lane            TEXT NOT NULL,
+                updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
         # Create indexes
         c.execute("CREATE INDEX IF NOT EXISTS idx_det_entry_time ON vehicle_detections(entry_time);")
         c.execute("CREATE INDEX IF NOT EXISTS idx_det_camera ON vehicle_detections(camera_id);")
@@ -345,6 +375,7 @@ def get_db_connection():
             # Connect with target database
             conn = mysql.connector.connect(**DB_CONFIG)
             _mysql_failure_logged = False
+            _ensure_mysql_tables(conn)
             return conn
         except Exception as e:
             _mysql_last_attempt = now

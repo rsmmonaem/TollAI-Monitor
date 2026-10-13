@@ -130,6 +130,59 @@ def check_db_health():
 if not check_db_health():
     init_mock_data()
 
+def load_camera_settings():
+    """Load customized camera names and lanes from database into NVR_CHANNELS."""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT camera_id, name, lane FROM camera_settings")
+        rows = cursor.fetchall()
+        for r in rows:
+            cid = r['camera_id']
+            if cid in NVR_CHANNELS:
+                if r.get('name'):
+                    NVR_CHANNELS[cid]['name'] = r['name']
+                if r.get('lane'):
+                    NVR_CHANNELS[cid]['lane'] = r['lane']
+        cursor.close()
+        conn.close()
+        if rows:
+            logger.info(f"Loaded {len(rows)} custom camera settings from database.")
+    except Exception as e:
+        logger.warning(f"Could not load camera settings from database: {e}")
+        if conn:
+            try: conn.close()
+            except Exception: pass
+
+def load_db_toll_rates():
+    """Load saved toll rates from database on startup into memory."""
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT vehicle_type, rate_amount FROM toll_rates")
+        rows = cursor.fetchall()
+        for r in rows:
+            vt = r['vehicle_type']
+            ra = float(r['rate_amount'])
+            TOLL_RATES[vt] = ra
+            mock_rates[vt] = ra
+        cursor.close()
+        conn.close()
+        if rows:
+            logger.info(f"Loaded {len(rows)} toll rates from database on startup.")
+    except Exception as e:
+        logger.warning(f"Could not load toll rates from DB: {e}")
+        if conn:
+            try: conn.close()
+            except Exception: pass
+
+load_camera_settings()
+load_db_toll_rates()
+
 # ─────────────────────────────────────────────────────────────
 # STATIC ROUTING
 # ─────────────────────────────────────────────────────────────
@@ -639,6 +692,64 @@ def get_config():
         'total_cameras': len(NVR_CHANNELS)
     })
 
+@app.route('/api/cameras/rename', methods=['POST'])
+@app.route('/api/camera/<int:cam_id>/rename', methods=['POST'])
+def rename_camera(cam_id=None):
+    data = request.json or {}
+    cid = cam_id or data.get('camera_id')
+    if not cid:
+        return jsonify({'success': False, 'message': 'Missing camera_id'}), 400
+    try:
+        cid = int(cid)
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'message': 'Invalid camera_id'}), 400
+        
+    if cid not in NVR_CHANNELS:
+        return jsonify({'success': False, 'message': f'Camera {cid} not found'}), 404
+        
+    new_name = str(data.get('name', '')).strip()
+    new_lane = str(data.get('lane', '')).strip()
+    
+    if not new_name:
+        return jsonify({'success': False, 'message': 'Camera name cannot be empty'}), 400
+    if not new_lane:
+        new_lane = NVR_CHANNELS[cid]['lane']
+        
+    # Update in-memory NVR_CHANNELS
+    NVR_CHANNELS[cid]['name'] = new_name
+    NVR_CHANNELS[cid]['lane'] = new_lane
+    
+    # Persist to database
+    conn = get_db_connection()
+    if conn:
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT camera_id FROM camera_settings WHERE camera_id = %s", (cid,))
+            if cursor.fetchone():
+                cursor.execute("UPDATE camera_settings SET name = %s, lane = %s WHERE camera_id = %s", (new_name, new_lane, cid))
+            else:
+                cursor.execute("INSERT INTO camera_settings (camera_id, name, lane) VALUES (%s, %s, %s)", (cid, new_name, new_lane))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            logger.info(f"Renamed Camera {cid} to '{new_name}' (Lane: '{new_lane}') in database")
+        except Exception as e:
+            logger.error(f"Error saving camera settings to DB: {e}")
+            if conn:
+                try: conn.close()
+                except Exception: pass
+                
+    return jsonify({
+        'success': True,
+        'message': f'Camera {cid} updated successfully',
+        'camera': {
+            'id': cid,
+            'name': new_name,
+            'lane': new_lane,
+            'channel': NVR_CHANNELS[cid]['channel']
+        }
+    })
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     conn = get_db_connection()
@@ -1132,6 +1243,15 @@ def save_rate():
     v_type = data['vehicle_type']
     new_rate = float(data['rate_amount'])
     
+    # Immediately synchronize in-memory toll rate
+    TOLL_RATES[v_type] = new_rate
+    mock_rates[v_type] = new_rate
+    if 'ai_engine' in sys.modules:
+        try:
+            sys.modules['ai_engine'].TOLL_RATES[v_type] = int(new_rate) if new_rate.is_integer() else new_rate
+        except Exception:
+            pass
+
     conn = get_db_connection()
     if conn:
         try:
@@ -1141,12 +1261,18 @@ def save_rate():
             old_row = cursor.fetchone()
             old_rate = float(old_row['rate_amount']) if old_row else TOLL_RATES.get(v_type, 0)
             
-            # Update rates
-            cursor.execute("""
-                INSERT INTO toll_rates (vehicle_type, rate_amount, effective_from, updated_by)
-                VALUES (%s, %s, CURDATE(), 'Admin')
-                ON DUPLICATE KEY UPDATE rate_amount = %s, updated_by = 'Admin'
-            """, (v_type, new_rate, new_rate))
+            # Update rates using standard SQL (compatible with SQLite and MySQL)
+            if old_row:
+                cursor.execute("""
+                    UPDATE toll_rates 
+                    SET rate_amount = %s, updated_by = 'Admin', updated_at = CURRENT_TIMESTAMP
+                    WHERE vehicle_type = %s
+                """, (new_rate, v_type))
+            else:
+                cursor.execute("""
+                    INSERT INTO toll_rates (vehicle_type, rate_amount, effective_from, updated_by)
+                    VALUES (%s, %s, CURDATE(), 'Admin')
+                """, (v_type, new_rate))
             
             # Audit log
             cursor.execute("""
@@ -1158,11 +1284,18 @@ def save_rate():
             cursor.close()
             conn.close()
             
+            # Update local in-memory records
+            for r in mock_records:
+                if r.get('vehicle_type') == v_type:
+                    r['toll_amount'] = new_rate
+                    
             logger.info(f"Updated rate for {v_type}: ৳{old_rate} -> ৳{new_rate}")
             return jsonify({'success': True, 'message': f'Updated {v_type} toll rate successfully'})
         except Exception as e:
-            logger.error(f"Error updating rate: {e}")
-            if conn: conn.close()
+            logger.error(f"Error updating rate in DB: {e}")
+            if conn:
+                try: conn.close()
+                except Exception: pass
             
     # Fallback Logic
     old_rate = mock_rates.get(v_type, 0)
@@ -1180,7 +1313,7 @@ def save_rate():
             r['toll_amount'] = new_rate
             
     logger.info(f"[Fallback Mode] Updated rate for {v_type}: ৳{old_rate} -> ৳{new_rate}")
-    return jsonify({'success': True, 'message': f'Updated {v_type} rate to ৳{new_rate} (Mock fallback)'})
+    return jsonify({'success': True, 'message': f'Updated {v_type} rate to ৳{new_rate} (Saved)'})
 
 @app.route('/api/rates/history', methods=['GET'])
 def get_rate_history():
@@ -1218,85 +1351,95 @@ def get_report():
     target_date = request.args.get('date', default=None)
     custom_start = request.args.get('start_time', default=None)
     custom_end = request.args.get('end_time', default=None)
-    days_back = 0
-    if report_type == 'weekly':
-        days_back = 7
-    elif report_type == 'monthly':
-        days_back = 30
-        
+    camera_ids_param = request.args.get('camera_ids', default=None) or request.args.get('cameras', default=None)
+
+    # Parse camera filter
+    selected_camera_ids = []
+    if camera_ids_param and str(camera_ids_param).strip().lower() != 'all':
+        for p in str(camera_ids_param).split(','):
+            p = p.strip()
+            if p.isdigit():
+                cid = int(p)
+                if cid in NVR_CHANNELS:
+                    selected_camera_ids.append(cid)
+        selected_camera_ids = sorted(list(set(selected_camera_ids)))
+
+    if selected_camera_ids:
+        cam_names = [NVR_CHANNELS[cid]['name'] for cid in selected_camera_ids]
+        if len(cam_names) == 1:
+            camera_filter_label = cam_names[0]
+        elif len(cam_names) == 2:
+            camera_filter_label = f"{cam_names[0]} & {cam_names[1]}"
+        else:
+            camera_filter_label = f"{len(cam_names)} Selected Cameras"
+    else:
+        camera_filter_label = "All Cameras (Combined)"
+
     conn = get_db_connection()
     if conn:
         try:
             cursor = conn.cursor(dictionary=True)
             report_label = None
+            where_clauses = []
+            params = []
             
-            # 1. Slot / Shift Based Report or Custom Date-Time Filter
+            # 1. Date / Time / Slot boundaries
             if slot_name or report_type == 'slot' or (custom_start and custom_end):
                 effective_slot = slot_name or ('custom' if (custom_start and custom_end) else 'slot1')
                 start_dt, end_dt, report_label = parse_slot_boundaries(
                     target_date, effective_slot, custom_start, custom_end
                 )
-                query = """
-                    SELECT 
-                        vehicle_type,
-                        COUNT(*) as count,
-                        COALESCE(SUM(toll_amount), 0) as revenue
-                    FROM vehicle_detections
-                    WHERE entry_time >= %s AND entry_time <= %s
-                    GROUP BY vehicle_type
-                """
-                cursor.execute(query, (
+                where_clauses.append("entry_time >= %s AND entry_time <= %s")
+                params.extend([
                     start_dt.strftime('%Y-%m-%d %H:%M:%S'),
                     end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                ))
+                ])
             elif report_type == 'weekly':
-                query = """
-                    SELECT 
-                        vehicle_type,
-                        COUNT(*) as count,
-                        COALESCE(SUM(toll_amount), 0) as revenue
-                    FROM vehicle_detections
-                    WHERE DATE(entry_time) >= SUBDATE(CURDATE(), 7)
-                    GROUP BY vehicle_type
-                """
-                cursor.execute(query)
+                where_clauses.append("DATE(entry_time) >= SUBDATE(CURDATE(), 7)")
             elif report_type == 'monthly':
-                query = """
-                    SELECT 
-                        vehicle_type,
-                        COUNT(*) as count,
-                        COALESCE(SUM(toll_amount), 0) as revenue
-                    FROM vehicle_detections
-                    WHERE DATE(entry_time) >= SUBDATE(CURDATE(), 30)
-                    GROUP BY vehicle_type
-                """
-                cursor.execute(query)
+                where_clauses.append("DATE(entry_time) >= SUBDATE(CURDATE(), 30)")
             else:
-                # Daily report (today or specific date)
                 if target_date:
-                    query = """
-                        SELECT 
-                            vehicle_type,
-                            COUNT(*) as count,
-                            COALESCE(SUM(toll_amount), 0) as revenue
-                        FROM vehicle_detections
-                        WHERE DATE(entry_time) = %s
-                        GROUP BY vehicle_type
-                    """
-                    cursor.execute(query, (target_date,))
+                    where_clauses.append("DATE(entry_time) = %s")
+                    params.append(target_date)
                 else:
-                    query = """
-                        SELECT 
-                            vehicle_type,
-                            COUNT(*) as count,
-                            COALESCE(SUM(toll_amount), 0) as revenue
-                        FROM vehicle_detections
-                        WHERE DATE(entry_time) = CURDATE()
-                        GROUP BY vehicle_type
-                    """
-                    cursor.execute(query)
+                    where_clauses.append("DATE(entry_time) = CURDATE()")
 
+            # 2. Camera filter
+            if selected_camera_ids:
+                cam_ph = ', '.join(['%s'] * len(selected_camera_ids))
+                where_clauses.append(f"camera_id IN ({cam_ph})")
+                params.extend(selected_camera_ids)
+
+            where_sql = " AND ".join(where_clauses)
+
+            # Query 1: Vehicle summary (filtered by camera)
+            query1 = f"""
+                SELECT 
+                    vehicle_type,
+                    COUNT(*) as count,
+                    COALESCE(SUM(toll_amount), 0) as revenue
+                FROM vehicle_detections
+                WHERE {where_sql}
+                GROUP BY vehicle_type
+            """
+            cursor.execute(query1, tuple(params))
             results = cursor.fetchall()
+
+            # Query 2: Camera-wise breakdown
+            query2 = f"""
+                SELECT 
+                    camera_id,
+                    vehicle_type,
+                    COUNT(*) as count,
+                    COALESCE(SUM(toll_amount), 0) as revenue
+                FROM vehicle_detections
+                WHERE {where_sql}
+                GROUP BY camera_id, vehicle_type
+                ORDER BY camera_id ASC
+            """
+            cursor.execute(query2, tuple(params))
+            cam_results = cursor.fetchall()
             
             # Get latest rates
             cursor.execute("SELECT vehicle_type, rate_amount FROM toll_rates")
@@ -1313,19 +1456,68 @@ def get_report():
             for r in results:
                 t = r['vehicle_type']
                 rate = rates.get(t, TOLL_RATES.get(t, 0))
+                cnt = int(r['count'])
+                rev = float(r['revenue'])
                 rows.append({
                     'vehicle_type': t,
-                    'count': r['count'],
+                    'count': cnt,
                     'rate': rate,
-                    'revenue': float(r['revenue'])
+                    'revenue': rev
                 })
-                total_count += r['count']
-                total_revenue += float(r['revenue'])
+                total_count += cnt
+                total_revenue += rev
+
+            # Build camera breakdown structure
+            cam_dict = {}
+            target_cams = selected_camera_ids if selected_camera_ids else sorted(list(NVR_CHANNELS.keys()))
+            for cid in target_cams:
+                info = NVR_CHANNELS.get(cid, {})
+                cam_dict[cid] = {
+                    'camera_id': cid,
+                    'name': info.get('name', f'Camera {cid}'),
+                    'lane': info.get('lane', f'Lane {cid}'),
+                    'channel': info.get('channel', str(cid)),
+                    'total_count': 0,
+                    'total_revenue': 0.0,
+                    'by_type': []
+                }
+
+            for row in cam_results:
+                cid = row['camera_id']
+                if cid not in cam_dict:
+                    info = NVR_CHANNELS.get(cid, {})
+                    cam_dict[cid] = {
+                        'camera_id': cid,
+                        'name': info.get('name', f'Camera {cid}'),
+                        'lane': info.get('lane', f'Lane {cid}'),
+                        'channel': info.get('channel', str(cid)),
+                        'total_count': 0,
+                        'total_revenue': 0.0,
+                        'by_type': []
+                    }
+                cnt = int(row['count'])
+                rev = float(row['revenue'])
+                cam_dict[cid]['total_count'] += cnt
+                cam_dict[cid]['total_revenue'] += rev
+                cam_dict[cid]['by_type'].append({
+                    'vehicle_type': row['vehicle_type'],
+                    'count': cnt,
+                    'revenue': rev
+                })
+
+            if selected_camera_ids:
+                camera_breakdown = [cam_dict[cid] for cid in selected_camera_ids if cid in cam_dict]
+            else:
+                active_cams = [cd for cd in cam_dict.values() if cd['total_count'] > 0]
+                camera_breakdown = active_cams if active_cams else [cam_dict[cid] for cid in [1, 2] if cid in cam_dict]
                 
             return jsonify({
                 'rows': rows,
                 'totalCount': total_count,
                 'totalRevenue': total_revenue,
+                'camera_breakdown': camera_breakdown,
+                'selected_cameras': selected_camera_ids if selected_camera_ids else 'all',
+                'camera_filter_label': camera_filter_label,
                 'label': report_label,
                 'type': report_type,
                 'slot': slot_name,
@@ -1335,32 +1527,38 @@ def get_report():
             logger.error(f"Error compiling report: {e}")
             if conn: conn.close()
 
-    # Fallback Logic
+    # Fallback Logic (Mock records)
     multiplier = 1
     if report_type == 'weekly':
         multiplier = 7
     elif report_type == 'monthly':
         multiplier = 30
         
+    filtered_records = mock_records
+    if selected_camera_ids:
+        filtered_records = [r for r in mock_records if r.get('camera_id') in selected_camera_ids]
+        
+    daily_stats = {}
+    cam_stats = {}
+    for r in filtered_records:
+        t = r.get('vehicle_type', 'Car')
+        cid = r.get('camera_id', 1)
+        toll = float(r.get('toll_amount', mock_rates.get(t, 20)))
+        
+        daily_stats[t] = daily_stats.get(t, 0) + 1
+        if cid not in cam_stats:
+            cam_stats[cid] = {'count': 0, 'revenue': 0.0, 'by_type': {}}
+        cam_stats[cid]['count'] += 1
+        cam_stats[cid]['revenue'] += toll
+        cam_stats[cid]['by_type'][t] = cam_stats[cid]['by_type'].get(t, 0) + 1
+
     rows = []
     total_count = 0
     total_revenue = 0
-    
-    # Calculate daily aggregate from mock data
-    daily_stats = {}
-    for v_type in VEHICLE_DISTRIBUTION.keys():
-        daily_stats[v_type] = {'count': 0, 'revenue': 0}
-        
-    for r in mock_records:
-        t = r['vehicle_type']
-        if t in daily_stats:
-            daily_stats[t]['count'] += 1
-            daily_stats[t]['revenue'] += r['toll_amount']
-            
-    for t, stat in daily_stats.items():
-        v_count = stat['count'] * multiplier
-        v_rev = stat['revenue'] * multiplier
+    for t, cnt in daily_stats.items():
+        v_count = cnt * multiplier
         rate = mock_rates.get(t, 0)
+        v_rev = v_count * rate
         rows.append({
             'vehicle_type': t,
             'count': v_count,
@@ -1369,11 +1567,37 @@ def get_report():
         })
         total_count += v_count
         total_revenue += v_rev
-        
+
+    camera_breakdown = []
+    target_cams = selected_camera_ids if selected_camera_ids else list(cam_stats.keys())
+    for cid in target_cams:
+        info = NVR_CHANNELS.get(cid, {})
+        cdata = cam_stats.get(cid, {'count': 0, 'revenue': 0.0, 'by_type': {}})
+        by_type_list = [
+            {'vehicle_type': vt, 'count': c * multiplier, 'revenue': c * multiplier * mock_rates.get(vt, 20)}
+            for vt, c in cdata['by_type'].items()
+        ]
+        camera_breakdown.append({
+            'camera_id': cid,
+            'name': info.get('name', f'Camera {cid}'),
+            'lane': info.get('lane', f'Lane {cid}'),
+            'channel': info.get('channel', str(cid)),
+            'total_count': cdata['count'] * multiplier,
+            'total_revenue': cdata['revenue'] * multiplier,
+            'by_type': by_type_list
+        })
+
     return jsonify({
         'rows': rows,
         'totalCount': total_count,
-        'totalRevenue': total_revenue
+        'totalRevenue': total_revenue,
+        'camera_breakdown': camera_breakdown,
+        'selected_cameras': selected_camera_ids if selected_camera_ids else 'all',
+        'camera_filter_label': camera_filter_label,
+        'label': None,
+        'type': report_type,
+        'slot': slot_name,
+        'date': target_date
     })
 
 # ─────────────────────────────────────────────────────────────

@@ -318,6 +318,9 @@
 
           <!-- View Mode Switcher & AI Camera Selector -->
           <div class="d-flex align-items-center flex-wrap gap-2">
+            <button class="view-btn" id="btn-rename-cams-modal" onclick="App.openRenameCameraModal()" style="background: rgba(59,130,246,0.18); color: #60a5fa; border: 1px solid rgba(59,130,246,0.35); font-weight:600;" title="Configure & Rename Cameras and Lanes">
+              <i class="bi bi-pencil-square"></i> Rename Cameras
+            </button>
             <button class="view-btn" id="btn-ai-cams-modal" onclick="App.openAiCameraModal()" style="background: rgba(168,85,247,0.18); color: #c084fc; border: 1px solid rgba(168,85,247,0.4); font-weight:600;" title="Select which cameras run YOLO AI detection">
               <i class="bi bi-cpu-fill text-warning"></i> AI Cameras: <span id="ai-active-count-badge" class="badge bg-purple ms-1" style="background:#a855f7; font-size:10px;">2</span>/14
             </button>
@@ -345,6 +348,7 @@
                   <i class="bi bi-camera-video text-danger-c"></i>
                   <span class="text-muted-c" style="font-size:12px; font-weight:600;">Slot 1:</span>
                   <select class="cam-select" id="slot1-cam-select" onchange="App.onCameraSelectChange(1, this.value)"></select>
+                  <button type="button" class="btn btn-sm btn-outline-secondary p-1" title="Rename Camera & Lane" onclick="App.openRenameCameraModal(App.getActiveCameraId(1))" style="line-height:1;font-size:11px;border-color:rgba(255,255,255,0.18);color:#94a3b8;"><i class="bi bi-pencil"></i></button>
                 </div>
                 <div class="d-flex align-items-center gap-2">
                   <span class="badge-ai-active" id="cam1f-ai-badge"><i class="bi bi-cpu-fill"></i> AI ACTIVE</span>
@@ -408,6 +412,7 @@
                   <i class="bi bi-camera-video text-danger-c"></i>
                   <span class="text-muted-c" style="font-size:12px; font-weight:600;">Slot 2:</span>
                   <select class="cam-select" id="slot2-cam-select" onchange="App.onCameraSelectChange(2, this.value)"></select>
+                  <button type="button" class="btn btn-sm btn-outline-secondary p-1" title="Rename Camera & Lane" onclick="App.openRenameCameraModal(App.getActiveCameraId(2))" style="line-height:1;font-size:11px;border-color:rgba(255,255,255,0.18);color:#94a3b8;"><i class="bi bi-pencil"></i></button>
                 </div>
                 <div class="d-flex align-items-center gap-2">
                   <span class="badge" id="cam2f-ai-badge" style="background:rgba(255,255,255,0.06); color:var(--text-muted); font-size:10px; border:1px solid var(--border);"><i class="bi bi-broadcast"></i> NVR STREAM</span>
@@ -933,35 +938,49 @@
         <div class="glass-card mb-4" id="slot-filter-panel">
           <div class="card-body-custom py-3">
             <div class="row g-3 align-items-end">
-              <div class="col-md-3">
+              <div class="col-md-2">
                 <label class="form-label mb-1" style="font-size:12px;font-weight:600;color:var(--text-secondary);">
-                  <i class="bi bi-calendar-event me-1"></i> Select Date
+                  <i class="bi bi-calendar-event me-1"></i> Date
                 </label>
                 <input type="date" id="report-date-input" class="form-control form-control-sm" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
               </div>
-              <div class="col-md-4">
+              <div class="col-md-3">
                 <label class="form-label mb-1" style="font-size:12px;font-weight:600;color:var(--text-secondary);">
-                  <i class="bi bi-stopwatch me-1"></i> Shift Slot (8-Hour Duty)
+                  <i class="bi bi-stopwatch me-1"></i> Shift Slot
                 </label>
                 <select id="report-slot-select" class="form-select form-select-sm" onchange="ReportsModule.onSlotSelectChange(this.value)" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
-                  <option value="slot1">Slot 1: Morning Shift (06:00 AM – 02:00 PM)</option>
-                  <option value="slot2" selected>Slot 2: Evening / Peak Shift (02:00 PM – 10:00 PM)</option>
-                  <option value="slot3">Slot 3: Night Shift (10:00 PM – 06:00 AM)</option>
-                  <option value="custom">Custom Time Slot (Specific Hours)</option>
+                  <option value="slot1">Slot 1: Morning (06:00 AM – 02:00 PM)</option>
+                  <option value="slot2" selected>Slot 2: Evening / Peak (02:00 PM – 10:00 PM)</option>
+                  <option value="slot3">Slot 3: Night (10:00 PM – 06:00 AM)</option>
+                  <option value="custom">Custom Time Slot</option>
                 </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label mb-1" style="font-size:12px;font-weight:600;color:var(--text-secondary);">
+                  <i class="bi bi-camera-video me-1"></i> Filter Camera / Lane
+                </label>
+                <div class="d-flex gap-1">
+                  <select id="report-camera-select" class="form-select form-select-sm" onchange="ReportsModule.onCameraSelectChange(this.value)" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+                    <option value="all" selected>🌐 All Cameras Combined (14 Lanes)</option>
+                    <option value="1,2">📹 Cameras 1 & 2 (Main Lanes)</option>
+                  </select>
+                  <button type="button" class="btn btn-sm btn-outline-info px-2" title="Select Multiple Cameras" onclick="ReportsModule.openMultiCameraModal()" style="font-size:11px;white-space:nowrap;line-height:1.2;">
+                    <i class="bi bi-ui-checks-grid"></i> Pick
+                  </button>
+                </div>
               </div>
               <div class="col-md-3" id="custom-time-group" style="display:none;">
                 <label class="form-label mb-1" style="font-size:12px;font-weight:600;color:var(--text-secondary);">
-                  <i class="bi bi-clock me-1"></i> Start & End Time
+                  <i class="bi bi-clock me-1"></i> Start & End
                 </label>
                 <div class="d-flex gap-2">
                   <input type="time" id="report-start-time" value="14:00" class="form-control form-control-sm" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
                   <input type="time" id="report-end-time" value="22:00" class="form-control form-control-sm" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
                 </div>
               </div>
-              <div class="col-md-2">
+              <div class="col-md-3">
                 <button class="btn btn-sm btn-primary w-100 py-1" onclick="ReportsModule.applySlotFilter()" style="font-weight:600;display:flex;align-items:center;justify-content:center;gap:5px;height:31px;">
-                  <i class="bi bi-funnel-fill"></i> Filter Report
+                  <i class="bi bi-funnel-fill"></i> Generate Report
                 </button>
               </div>
             </div>
@@ -975,7 +994,7 @@
               <div style="width:44px;height:44px;background:rgba(37,99,235,0.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;">📋</div>
               <div>
                 <div id="report-title" style="font-size:15px;font-weight:700;color:var(--text-primary);">Daily Report</div>
-                <div style="font-size:12px;color:var(--text-muted);">Dhaka Bypass Toll Plaza · Generated by AI Monitoring System</div>
+                <div style="font-size:12px;color:var(--text-muted);" id="report-subtitle">Dhaka Bypass Toll Plaza · Generated by AI Monitoring System</div>
               </div>
             </div>
           </div>
@@ -983,6 +1002,11 @@
 
         <!-- Summary Stats -->
         <div class="row g-3 mb-4" id="report-summary">
+          <!-- Rendered by reports.js -->
+        </div>
+
+        <!-- Camera-Wise Breakdown Section -->
+        <div id="report-camera-breakdown-section" class="mb-4">
           <!-- Rendered by reports.js -->
         </div>
 
@@ -1080,6 +1104,107 @@
           <button type="button" class="btn btn-secondary py-1 px-3" data-bs-dismiss="modal" style="font-size: 13px; background: rgba(148,163,184,0.15); border: none; color: #e2e8f0;">Cancel</button>
           <button type="button" class="btn btn-primary py-1 px-4" onclick="App.saveAiCameraModalSelection()" style="font-size: 13px; background: #3b82f6; border: none; font-weight: 600;">
             <i class="bi bi-check2-circle me-1"></i> Apply & Start AI
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL: RENAME CAMERA & EDIT LANE ── -->
+<div class="modal fade" id="renameCameraModal" tabindex="-1" aria-labelledby="renameCameraModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background: #0f172a; border: 1px solid rgba(148,163,184,0.2); border-radius: 16px; color: #f8fafc; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);">
+      <div class="modal-header" style="border-bottom: 1px solid rgba(148,163,184,0.15); padding: 16px 24px;">
+        <div class="d-flex align-items-center gap-3">
+          <div style="background: rgba(59,130,246,0.2); color: #60a5fa; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size:20px;">
+            <i class="bi bi-pencil-square"></i>
+          </div>
+          <div>
+            <h5 class="modal-title mb-0" id="renameCameraModalLabel" style="font-weight: 700; font-size: 17px;">Configure Camera & Lane</h5>
+            <small style="color: #94a3b8; font-size: 12px;">Rename camera and edit lane/booth description</small>
+          </div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" style="padding: 20px 24px;">
+        <form id="rename-camera-form" onsubmit="event.preventDefault(); App.saveRenameCamera();">
+          <div class="mb-3">
+            <label class="form-label" style="font-size:12px;font-weight:600;color:#94a3b8;">Select Camera Channel</label>
+            <select id="rename-camera-select" class="form-select form-select-sm" onchange="App.onRenameModalCameraChange(this.value)" style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" style="font-size:12px;font-weight:600;color:#94a3b8;">Camera Display Name</label>
+            <input type="text" id="rename-camera-name" class="form-control form-control-sm" placeholder="e.g. Camera 1 (Ch 101 - Toll Lane A)" required style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" style="font-size:12px;font-weight:600;color:#94a3b8;">Lane / Booth Name</label>
+            <input type="text" id="rename-camera-lane" class="form-control form-control-sm" placeholder="e.g. Toll Lane A (Inbound)" required style="background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer d-flex justify-content-between align-items-center" style="border-top: 1px solid rgba(148,163,184,0.15); padding: 14px 24px;">
+        <div style="font-size: 11.5px; color: #94a3b8;">
+          <i class="bi bi-shield-check text-success-c me-1"></i> Saves permanently to database
+        </div>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-secondary py-1 px-3" data-bs-dismiss="modal" style="font-size: 13px; background: rgba(148,163,184,0.15); border: none; color: #e2e8f0;">Cancel</button>
+          <button type="button" class="btn btn-primary py-1 px-4" onclick="App.saveRenameCamera()" style="font-size: 13px; background: #3b82f6; border: none; font-weight: 600;">
+            <i class="bi bi-check2-circle me-1"></i> Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL: REPORT MULTI-CAMERA PICKER ── -->
+<div class="modal fade" id="reportCameraModal" tabindex="-1" aria-labelledby="reportCameraModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content" style="background: #0f172a; border: 1px solid rgba(148,163,184,0.2); border-radius: 16px; color: #f8fafc; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);">
+      <div class="modal-header" style="border-bottom: 1px solid rgba(148,163,184,0.15); padding: 16px 24px;">
+        <div class="d-flex align-items-center gap-3">
+          <div style="background: rgba(16,185,129,0.2); color: #34d399; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size:20px;">
+            <i class="bi bi-camera-reels-fill"></i>
+          </div>
+          <div>
+            <h5 class="modal-title mb-0" id="reportCameraModalLabel" style="font-weight: 700; font-size: 17px;">Select Cameras for Accounting Report</h5>
+            <small style="color: #94a3b8; font-size: 12px;">Choose single or multiple cameras to audit vehicle traffic and toll earnings</small>
+          </div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" style="padding: 20px 24px;">
+        <!-- Quick Presets -->
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 pb-3" style="border-bottom: 1px solid rgba(148,163,184,0.15);">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span style="font-size: 12px; color: #94a3b8; font-weight: 600;">Presets:</span>
+            <button type="button" class="btn btn-sm py-1 px-2" onclick="ReportsModule.selectPreset('all')" style="background:rgba(255,255,255,0.06); color:#e2e8f0; font-size: 11px; border:1px solid var(--border);">All 14 Cameras</button>
+            <button type="button" class="btn btn-sm py-1 px-2" onclick="ReportsModule.selectPreset('lanes12')" style="background:rgba(59,130,246,0.15); color:#60a5fa; font-size: 11px; border:1px solid rgba(59,130,246,0.3);">Main Lanes (1 & 2)</button>
+            <button type="button" class="btn btn-sm py-1 px-2" onclick="ReportsModule.selectPreset('lanes14')" style="background:rgba(16,185,129,0.15); color:#34d399; font-size: 11px; border:1px solid rgba(16,185,129,0.3);">Toll Lanes (1 to 4)</button>
+            <button type="button" class="btn btn-sm py-1 px-2" onclick="ReportsModule.selectPreset('clear')" style="background:rgba(239,68,68,0.15); color:#f87171; font-size: 11px; border:1px solid rgba(239,68,68,0.3);">Clear</button>
+          </div>
+          <div>
+            <span class="badge" id="report-modal-selected-badge" style="background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid rgba(16,185,129,0.35); font-size: 12px; padding: 6px 12px;">
+              All Selected
+            </span>
+          </div>
+        </div>
+
+        <!-- Camera Checkbox Grid -->
+        <div class="row g-2" id="report-camera-checkbox-grid" style="max-height: 380px; overflow-y: auto;">
+          <!-- Dynamically populated by ReportsModule.renderCameraModalGrid() -->
+        </div>
+      </div>
+      <div class="modal-footer d-flex justify-content-between align-items-center" style="border-top: 1px solid rgba(148,163,184,0.15); padding: 14px 24px;">
+        <div style="font-size: 11.5px; color: #94a3b8;">
+          <i class="bi bi-info-circle me-1"></i> Reports automatically aggregate data across all checked cameras
+        </div>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-secondary py-1 px-3" data-bs-dismiss="modal" style="font-size: 13px; background: rgba(148,163,184,0.15); border: none; color: #e2e8f0;">Cancel</button>
+          <button type="button" class="btn btn-success py-1 px-4" onclick="ReportsModule.saveMultiCameraSelection()" style="font-size: 13px; background: #10b981; border: none; font-weight: 600;">
+            <i class="bi bi-funnel-fill me-1"></i> Apply Camera Filter
           </button>
         </div>
       </div>

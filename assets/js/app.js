@@ -965,6 +965,120 @@ const App = (() => {
     }
   }
 
+  function getActiveCameraId(slot) {
+    return activeCameras[`slot${slot}`] || (slot === 1 ? 1 : 2);
+  }
+
+  function openRenameCameraModal(camId) {
+    const cams = window.AppData.cameras || [];
+    if (!cams.length) return;
+
+    const selectEl = document.getElementById('rename-camera-select');
+    if (selectEl) {
+      selectEl.innerHTML = cams.map(c => 
+        `<option value="${c.id}">${c.name} (${c.lane})</option>`
+      ).join('');
+    }
+
+    const targetId = camId ? parseInt(camId, 10) : (cams[0] ? cams[0].id : 1);
+    if (selectEl) selectEl.value = targetId;
+    onRenameModalCameraChange(targetId);
+
+    const modalEl = document.getElementById('renameCameraModal');
+    if (modalEl && window.bootstrap) {
+      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      modal.show();
+    }
+  }
+
+  function onRenameModalCameraChange(camId) {
+    camId = parseInt(camId, 10);
+    const cams = window.AppData.cameras || [];
+    const cam = cams.find(c => c.id === camId);
+    if (!cam) return;
+
+    const nameInput = document.getElementById('rename-camera-name');
+    const laneInput = document.getElementById('rename-camera-lane');
+    if (nameInput) nameInput.value = cam.name || '';
+    if (laneInput) laneInput.value = cam.lane || '';
+  }
+
+  async function saveRenameCamera() {
+    const selectEl = document.getElementById('rename-camera-select');
+    const nameInput = document.getElementById('rename-camera-name');
+    const laneInput = document.getElementById('rename-camera-lane');
+
+    if (!selectEl || !nameInput || !laneInput) return;
+
+    const camId = parseInt(selectEl.value, 10);
+    const newName = nameInput.value.trim();
+    const newLane = laneInput.value.trim();
+
+    if (!newName) {
+      toast('Camera name cannot be empty', 'error');
+      return;
+    }
+
+    try {
+      const resp = await fetch('/api/cameras/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          camera_id: camId,
+          name: newName,
+          lane: newLane
+        })
+      });
+
+      if (resp.ok) {
+        // Update local window.AppData.cameras
+        const cams = window.AppData.cameras || [];
+        const target = cams.find(c => c.id === camId);
+        if (target) {
+          target.name = newName;
+          target.lane = newLane;
+        }
+
+        // Re-initialize camera selectors across UI
+        initCameraSelectors();
+        renderAll14View();
+
+        // Refresh reports camera dropdown
+        if (window.ReportsModule && typeof window.ReportsModule.populateCameraDropdown === 'function') {
+          window.ReportsModule.populateCameraDropdown();
+        }
+
+        toast(`✅ Camera ${camId} renamed successfully`, 'success');
+
+        const modalEl = document.getElementById('renameCameraModal');
+        if (modalEl && window.bootstrap) {
+          const modal = bootstrap.Modal.getInstance(modalEl);
+          if (modal) modal.hide();
+        }
+      } else {
+        toast('Failed to rename camera on server', 'error');
+      }
+    } catch (e) {
+      // Local fallback
+      const cams = window.AppData.cameras || [];
+      const target = cams.find(c => c.id === camId);
+      if (target) {
+        target.name = newName;
+        target.lane = newLane;
+      }
+      initCameraSelectors();
+      if (window.ReportsModule && typeof window.ReportsModule.populateCameraDropdown === 'function') {
+        window.ReportsModule.populateCameraDropdown();
+      }
+      toast(`Updated Camera ${camId} locally`, 'info');
+      const modalEl = document.getElementById('renameCameraModal');
+      if (modalEl && window.bootstrap) {
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) modal.hide();
+      }
+    }
+  }
+
   return { 
     init, 
     navigateTo, 
@@ -982,7 +1096,11 @@ const App = (() => {
     toggleAiCamera,
     updateAiBadges,
     toggleMasterAi,
-    syncMasterAiStatus
+    syncMasterAiStatus,
+    getActiveCameraId,
+    openRenameCameraModal,
+    onRenameModalCameraChange,
+    saveRenameCamera
   };
 })();
 
