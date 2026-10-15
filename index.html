@@ -1052,6 +1052,25 @@
           </div>
         </div>
 
+        <!-- Individual Vehicle Passage Log Table -->
+        <div class="glass-card mt-4">
+          <div class="card-header-custom d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <h6><i class="bi bi-car-front-fill text-info-c"></i> Vehicle Passage Audit Logs (গাড়ির ট্রানজেকশন ও ডিটেকশন বিস্তারিত)</h6>
+              <span class="badge" id="report-vehicles-count-badge" style="background:rgba(59,130,246,0.15);color:#60a5fa;font-size:11px;font-weight:600;">0 Vehicles Logged</span>
+            </div>
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+              <input type="text" id="report-vehicle-search" class="form-control form-control-sm" placeholder="🔍 Search Plate / Type / Camera..." oninput="ReportsModule.filterVehicleLogs(this.value)" style="width:220px;font-size:11.5px;background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+              <select id="report-vehicle-type-filter" class="form-select form-select-sm" onchange="ReportsModule.filterVehicleType(this.value)" style="width:130px;font-size:11.5px;background:rgba(15,23,42,0.8);color:#f8fafc;border:1px solid rgba(255,255,255,0.15);">
+                <option value="all">All Classes</option>
+              </select>
+            </div>
+          </div>
+          <div class="card-body-custom p-0" id="report-vehicles-table-container">
+            <!-- Rendered by reports.js -->
+          </div>
+        </div>
+
       </section>
 
       <!-- Dashboard Page Footer -->

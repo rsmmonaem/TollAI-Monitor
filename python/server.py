@@ -1597,6 +1597,26 @@ def get_report():
             """
             cursor.execute(query2, tuple(params))
             cam_results = cursor.fetchall()
+
+            # Query 3: Individual vehicle detection audit log
+            query3 = f"""
+                SELECT 
+                    id,
+                    entry_time,
+                    plate_number,
+                    vehicle_type,
+                    camera_id,
+                    confidence,
+                    toll_amount,
+                    status,
+                    image_path
+                FROM vehicle_detections
+                WHERE {where_sql}
+                ORDER BY entry_time DESC
+                LIMIT 1500
+            """
+            cursor.execute(query3, tuple(params))
+            vehicle_logs = cursor.fetchall()
             
             # Get latest rates
             cursor.execute("SELECT vehicle_type, rate_amount FROM toll_rates")
@@ -1623,6 +1643,27 @@ def get_report():
                 })
                 total_count += cnt
                 total_revenue += rev
+
+            # Build detailed vehicles list
+            vehicles = []
+            for v in vehicle_logs:
+                cid = v.get('camera_id') or 1
+                info = NVR_CHANNELS.get(cid, {})
+                t_val = v.get('entry_time')
+                time_str = t_val.strftime('%Y-%m-%d %H:%M:%S') if hasattr(t_val, 'strftime') else str(t_val)
+                vehicles.append({
+                    'id': v.get('id'),
+                    'entry_time': time_str,
+                    'plate_number': v.get('plate_number') or 'UNREAD',
+                    'vehicle_type': v.get('vehicle_type'),
+                    'camera_id': cid,
+                    'camera_name': info.get('name', f'Camera {cid}'),
+                    'lane': info.get('lane', f'Lane {cid}'),
+                    'confidence': float(v.get('confidence') or 0),
+                    'toll_amount': float(v.get('toll_amount') or 0),
+                    'status': v.get('status') or 'verified',
+                    'image_path': v.get('image_path')
+                })
 
             # Build camera breakdown structure
             cam_dict = {}
@@ -1673,6 +1714,7 @@ def get_report():
                 'totalCount': total_count,
                 'totalRevenue': total_revenue,
                 'camera_breakdown': camera_breakdown,
+                'vehicles': vehicles,
                 'selected_cameras': selected_camera_ids if selected_camera_ids else 'all',
                 'camera_filter_label': camera_filter_label,
                 'label': report_label,
@@ -1745,11 +1787,32 @@ def get_report():
             'by_type': by_type_list
         })
 
+    sample_vehicles = []
+    for r in filtered_records[:1000]:
+        cid = r.get('camera_id', 1)
+        info = NVR_CHANNELS.get(cid, {})
+        entry_t = r.get('entry_time')
+        time_str = entry_t.strftime('%Y-%m-%d %H:%M:%S') if hasattr(entry_t, 'strftime') else str(entry_t)
+        sample_vehicles.append({
+            'id': r.get('id'),
+            'entry_time': time_str,
+            'plate_number': r.get('plate_number', 'UNREAD'),
+            'vehicle_type': r.get('vehicle_type', 'Car'),
+            'camera_id': cid,
+            'camera_name': info.get('name', f'Camera {cid}'),
+            'lane': info.get('lane', f'Lane {cid}'),
+            'confidence': float(r.get('confidence', 90.0)),
+            'toll_amount': float(r.get('toll_amount', 25)),
+            'status': r.get('status', 'verified'),
+            'image_path': r.get('image_path')
+        })
+
     return jsonify({
         'rows': rows,
         'totalCount': total_count,
         'totalRevenue': total_revenue,
         'camera_breakdown': camera_breakdown,
+        'vehicles': sample_vehicles,
         'selected_cameras': selected_camera_ids if selected_camera_ids else 'all',
         'camera_filter_label': camera_filter_label,
         'label': None,

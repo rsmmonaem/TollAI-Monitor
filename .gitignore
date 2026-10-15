@@ -16,6 +16,8 @@ __pycache__/
 
 # Ignore local database and logs
 *.db
+*.db-shm
+*.db-wal
 *.log
 
 # Ignore local vehicle captures (YOLO output directory)
